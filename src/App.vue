@@ -16,6 +16,8 @@ import { RouterLink, RouterView } from 'vue-router'
       <nav class="nav">
         <RouterLink to="/">WebApps</RouterLink>
         <RouterLink to="/automation">自动化</RouterLink>
+        <RouterLink to="/scripts">用户脚本</RouterLink>
+        <RouterLink to="/ai">AI 模板</RouterLink>
         <RouterLink to="/settings">设置</RouterLink>
       </nav>
     </aside>

@@ -17,7 +17,9 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -124,6 +126,24 @@ button {
   }
 }
 
+.form-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  h2 {
+    margin: 0;
+  }
+
+  button {
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 7px 10px;
+    background: #ffffff;
+  }
+}
+
 .create-form {
   display: grid;
   gap: 16px;
@@ -136,13 +156,20 @@ label {
   font-size: 14px;
 }
 
-input {
+input,
+select,
+textarea {
   width: 100%;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   padding: 10px 12px;
   color: #0f172a;
   background: #ffffff;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 92px;
 }
 
 input[type='checkbox'] {
@@ -167,6 +194,12 @@ input[type='checkbox'] {
   }
 }
 
+.inline-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .primary-button {
   border: 0;
   border-radius: 8px;
@@ -174,6 +207,23 @@ input[type='checkbox'] {
   color: #ffffff;
   background: #0f766e;
   font-weight: 700;
+}
+
+.message {
+  margin: 0 0 12px;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.message.error {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.message.success {
+  color: #065f46;
+  background: #d1fae5;
 }
 
 .panel-title,
@@ -218,10 +268,18 @@ input[type='checkbox'] {
     font-size: 13px;
     word-break: break-all;
   }
+
+  small {
+    display: block;
+    margin-top: 5px;
+    color: #0f766e;
+    font-size: 12px;
+  }
 }
 
 .app-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 
   button {
@@ -233,6 +291,22 @@ input[type='checkbox'] {
 
   .danger {
     color: #b91c1c;
+  }
+}
+
+.import-export {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #e2e8f0;
+
+  button {
+    width: fit-content;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: #ffffff;
   }
 }
 
@@ -257,6 +331,18 @@ input[type='checkbox'] {
 .settings-panel {
   display: grid;
   gap: 14px;
+}
+
+.runtime-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 10px 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e2e8f0;
+
+  span {
+    color: #64748b;
+  }
 }
 
 @media (max-width: 820px) {

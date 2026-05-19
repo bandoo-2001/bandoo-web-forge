@@ -1,30 +1,179 @@
 <script setup lang="ts">
-import { onMounted, reactive } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useWebAppStore } from '@/stores/webapps'
-import type { WebAppDraft } from '@/types/webapp'
+import type { DesktopIntegrationTarget } from '@/types/webapp'
+import type { WebApp, WebAppDraft } from '@/types/webapp'
 
 const store = useWebAppStore()
 const { items, loading } = storeToRefs(store)
+const editingId = ref<string | null>(null)
+const errorMessage = ref('')
+const statusMessage = ref('')
+const importText = ref('')
 
-const draft = reactive<WebAppDraft>({
-  name: 'ChatGPT',
-  url: 'https://chatgpt.com',
-  windowConfig: {
-    width: 1280,
-    height: 860,
-  },
-  permissions: {
-    clipboard: true,
-    shell: false,
-    filesystem: false,
-  },
-  startOnBoot: false,
-  tray: true,
-})
+function defaultDraft(): WebAppDraft {
+  return {
+    name: 'ChatGPT',
+    url: 'https://chatgpt.com',
+    userAgent: '',
+    icon: '',
+    windowConfig: {
+      width: 1280,
+      height: 860,
+      maximized: false,
+    },
+    permissions: {
+      page: true,
+      clipboard: true,
+      shell: false,
+      filesystem: false,
+      network: false,
+      notification: true,
+    },
+    scriptConfig: {
+      injectBridge: true,
+      customScriptEnabled: false,
+      customScript: '',
+    },
+    startOnBoot: false,
+    tray: true,
+  }
+}
+
+const draft = reactive<WebAppDraft>(defaultDraft())
+const formTitle = computed(() => (editingId.value ? '编辑 WebApp' : '创建 WebApp'))
+const submitText = computed(() => (editingId.value ? '保存修改' : '创建应用'))
+
+function assignDraft(nextDraft: WebAppDraft) {
+  Object.assign(draft, {
+    ...nextDraft,
+    windowConfig: { ...nextDraft.windowConfig },
+    permissions: { ...nextDraft.permissions },
+    scriptConfig: { ...nextDraft.scriptConfig },
+  })
+}
+
+function resetForm() {
+  editingId.value = null
+  assignDraft(defaultDraft())
+}
+
+function edit(app: WebApp) {
+  editingId.value = app.id
+  assignDraft({
+    name: app.name,
+    icon: app.icon,
+    url: app.url,
+    userAgent: app.userAgent ?? '',
+    startOnBoot: app.startOnBoot ?? false,
+    tray: app.tray ?? true,
+    windowConfig: {
+      width: app.windowConfig.width,
+      height: app.windowConfig.height,
+      maximized: app.windowConfig.maximized ?? false,
+    },
+    permissions: {
+      clipboard: app.permissions.clipboard,
+      shell: app.permissions.shell,
+      filesystem: app.permissions.filesystem,
+      page: app.permissions.page,
+      network: app.permissions.network,
+      notification: app.permissions.notification,
+    },
+    scriptConfig: {
+      injectBridge: app.scriptConfig?.injectBridge ?? true,
+      customScriptEnabled: app.scriptConfig?.customScriptEnabled ?? false,
+      customScript: app.scriptConfig?.customScript ?? '',
+    },
+  })
+}
+
+function normalizedDraft(): WebAppDraft {
+  const url = new URL(draft.url.trim())
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error('URL 只支持 http 或 https')
+  }
+
+  return {
+    ...draft,
+    name: draft.name.trim(),
+    url: url.toString(),
+    icon: draft.icon?.trim() || undefined,
+    userAgent: draft.userAgent?.trim() || undefined,
+    windowConfig: { ...draft.windowConfig },
+    permissions: { ...draft.permissions },
+    scriptConfig: { ...draft.scriptConfig },
+  }
+}
 
 async function submit() {
-  await store.create({ ...draft, windowConfig: { ...draft.windowConfig }, permissions: { ...draft.permissions } })
+  try {
+    errorMessage.value = ''
+    statusMessage.value = ''
+    const payload = normalizedDraft()
+    if (editingId.value) {
+      await store.update(editingId.value, payload)
+      statusMessage.value = '已保存修改'
+    } else {
+      await store.create(payload)
+      statusMessage.value = '已创建应用'
+    }
+    resetForm()
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function launch(id: string) {
+  try {
+    errorMessage.value = ''
+    await store.launch(id)
+    statusMessage.value = '已发送启动请求'
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function install(app: WebApp, target: DesktopIntegrationTarget) {
+  try {
+    errorMessage.value = ''
+    const result = await store.installIntegration(app.id, target)
+    statusMessage.value = `已写入 ${result.path}`
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function uninstall(app: WebApp, target: DesktopIntegrationTarget) {
+  try {
+    errorMessage.value = ''
+    const result = await store.removeIntegration(app.id, target)
+    statusMessage.value = `已移除 ${result.path}`
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+function exportJson() {
+  const blob = new Blob([store.exportJson()], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = 'bandoo-webforge-webapps.json'
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
+async function importJson() {
+  try {
+    errorMessage.value = ''
+    await store.importJson(importText.value)
+    importText.value = ''
+    statusMessage.value = '已导入 WebApp 配置'
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : String(error)
+  }
 }
 
 onMounted(() => {
@@ -42,7 +191,10 @@ onMounted(() => {
 
   <section class="dashboard-grid">
     <form class="panel create-form" @submit.prevent="submit">
-      <h2>创建 WebApp</h2>
+      <div class="form-title">
+        <h2>{{ formTitle }}</h2>
+        <button v-if="editingId" type="button" @click="resetForm">取消</button>
+      </div>
       <label>
         <span>名称</span>
         <input v-model="draft.name" required placeholder="ChatGPT" />
@@ -50,6 +202,14 @@ onMounted(() => {
       <label>
         <span>URL</span>
         <input v-model="draft.url" required type="url" placeholder="https://chatgpt.com" />
+      </label>
+      <label>
+        <span>图标路径</span>
+        <input v-model="draft.icon" placeholder="Linux .desktop 可复用本地图标路径" />
+      </label>
+      <label>
+        <span>UserAgent</span>
+        <input v-model="draft.userAgent" placeholder="留空则使用系统 WebView 默认值" />
       </label>
       <div class="field-row">
         <label>
@@ -62,11 +222,25 @@ onMounted(() => {
         </label>
       </div>
       <div class="toggle-row">
+        <label><input v-model="draft.permissions.page" type="checkbox" /> 页面</label>
         <label><input v-model="draft.permissions.clipboard" type="checkbox" /> 剪贴板</label>
+        <label><input v-model="draft.permissions.filesystem" type="checkbox" /> 文件</label>
+        <label><input v-model="draft.permissions.shell" type="checkbox" /> Shell</label>
+        <label><input v-model="draft.permissions.network" type="checkbox" /> 网络</label>
+        <label><input v-model="draft.permissions.notification" type="checkbox" /> 通知</label>
         <label><input v-model="draft.tray" type="checkbox" /> 托盘</label>
         <label><input v-model="draft.startOnBoot" type="checkbox" /> 开机启动</label>
+        <label><input v-model="draft.windowConfig.maximized" type="checkbox" /> 默认最大化</label>
       </div>
-      <button class="primary-button" type="submit">创建应用</button>
+      <div class="toggle-row">
+        <label><input v-model="draft.scriptConfig.injectBridge" type="checkbox" /> 注入 Bridge</label>
+        <label><input v-model="draft.scriptConfig.customScriptEnabled" type="checkbox" /> 启用自定义脚本</label>
+      </div>
+      <label>
+        <span>自定义注入脚本</span>
+        <textarea v-model="draft.scriptConfig.customScript" rows="5" spellcheck="false" />
+      </label>
+      <button class="primary-button" type="submit">{{ submitText }}</button>
     </form>
 
     <section class="panel app-list">
@@ -74,6 +248,8 @@ onMounted(() => {
         <h2>应用列表</h2>
         <span v-if="loading">加载中</span>
       </div>
+      <p v-if="errorMessage" class="message error">{{ errorMessage }}</p>
+      <p v-if="statusMessage" class="message success">{{ statusMessage }}</p>
 
       <div v-if="items.length === 0" class="empty-state">还没有 WebApp，先创建一个。</div>
 
@@ -81,12 +257,26 @@ onMounted(() => {
         <div>
           <strong>{{ app.name }}</strong>
           <span>{{ app.url }}</span>
+          <small v-if="app.lastWindowState">
+            {{ app.lastWindowState.width }} × {{ app.lastWindowState.height }}
+          </small>
         </div>
         <div class="app-actions">
-          <button type="button" @click="store.launch(app.id)">启动</button>
+          <button type="button" @click="launch(app.id)">启动</button>
+          <button type="button" @click="edit(app)">编辑</button>
+          <button type="button" @click="install(app, 'applications')">菜单入口</button>
+          <button type="button" @click="install(app, 'desktop')">桌面入口</button>
+          <button type="button" @click="install(app, 'autostart')">自启动</button>
+          <button type="button" @click="uninstall(app, 'autostart')">取消自启动</button>
           <button type="button" class="danger" @click="store.remove(app.id)">删除</button>
         </div>
       </article>
+
+      <div class="import-export">
+        <button type="button" @click="exportJson">导出 JSON</button>
+        <textarea v-model="importText" rows="5" placeholder="粘贴 WebApp JSON 数组后导入" />
+        <button type="button" @click="importJson">导入 JSON</button>
+      </div>
     </section>
   </section>
 </template>

@@ -1,6 +1,11 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
-import type { WebApp, WebAppDraft } from '@/types/webapp'
+import type {
+  DesktopIntegrationResult,
+  DesktopIntegrationTarget,
+  WebApp,
+  WebAppDraft,
+} from '@/types/webapp'
 
 const STORAGE_KEY = 'bandoo-webforge.webapps'
 
@@ -21,6 +26,25 @@ function writeLocalWebApps(items: WebApp[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(items))
 }
 
+function normalizeWebApp(item: WebApp): WebApp {
+  return {
+    ...item,
+    permissions: {
+      page: item.permissions.page ?? true,
+      clipboard: item.permissions.clipboard ?? false,
+      shell: item.permissions.shell ?? false,
+      filesystem: item.permissions.filesystem ?? false,
+      network: item.permissions.network ?? false,
+      notification: item.permissions.notification ?? false,
+    },
+    scriptConfig: item.scriptConfig ?? {
+      injectBridge: true,
+      customScriptEnabled: false,
+      customScript: '',
+    },
+  }
+}
+
 export const useWebAppStore = defineStore('webapps', {
   state: () => ({
     items: [] as WebApp[],
@@ -30,11 +54,21 @@ export const useWebAppStore = defineStore('webapps', {
     async load() {
       this.loading = true
       try {
-        this.items = isTauriRuntime()
+        const items = isTauriRuntime()
           ? await invoke<WebApp[]>('list_webapps')
           : readLocalWebApps()
+        this.items = items.map(normalizeWebApp)
       } finally {
         this.loading = false
+      }
+    },
+    async save(webapp: WebApp) {
+      const item = normalizeWebApp(webapp)
+      if (isTauriRuntime()) {
+        this.items = (await invoke<WebApp[]>('upsert_webapp', { webapp: item })).map(normalizeWebApp)
+      } else {
+        this.items = [item, ...this.items.filter((candidate) => candidate.id !== item.id)]
+        writeLocalWebApps(this.items)
       }
     },
     async create(draft: WebAppDraft) {
@@ -44,12 +78,19 @@ export const useWebAppStore = defineStore('webapps', {
         createdAt: Date.now(),
       }
 
-      if (isTauriRuntime()) {
-        this.items = await invoke<WebApp[]>('upsert_webapp', { webapp: item })
-      } else {
-        this.items = [item, ...this.items]
-        writeLocalWebApps(this.items)
-      }
+      await this.save(item)
+    },
+    async update(id: string, draft: WebAppDraft) {
+      const current = this.items.find((item) => item.id === id)
+      if (!current) return
+
+      await this.save({
+        ...current,
+        ...draft,
+        windowConfig: { ...draft.windowConfig },
+        permissions: { ...draft.permissions },
+        updatedAt: Date.now(),
+      })
     },
     async remove(id: string) {
       if (isTauriRuntime()) {
@@ -69,6 +110,32 @@ export const useWebAppStore = defineStore('webapps', {
       if (app) {
         window.open(app.url, '_blank', 'noopener,noreferrer')
       }
+    },
+    exportJson() {
+      return JSON.stringify(this.items.map(normalizeWebApp), null, 2)
+    },
+    async importJson(raw: string) {
+      const parsed = JSON.parse(raw) as WebApp[]
+      if (!Array.isArray(parsed)) {
+        throw new Error('Imported WebApp JSON must be an array')
+      }
+
+      const imported = parsed.map(normalizeWebApp)
+      for (const item of imported) {
+        await this.save(item)
+      }
+    },
+    async installIntegration(id: string, target: DesktopIntegrationTarget) {
+      if (!isTauriRuntime()) {
+        throw new Error('Desktop integration is only available in the Tauri runtime')
+      }
+      return await invoke<DesktopIntegrationResult>('install_desktop_entry', { id, target })
+    },
+    async removeIntegration(id: string, target: DesktopIntegrationTarget) {
+      if (!isTauriRuntime()) {
+        throw new Error('Desktop integration is only available in the Tauri runtime')
+      }
+      return await invoke<DesktopIntegrationResult>('remove_desktop_entry', { id, target })
     },
   },
 })
