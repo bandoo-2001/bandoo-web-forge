@@ -32,3 +32,10 @@ export interface AutomationConfig {
 }
 
 export type AutomationDraft = Omit<AutomationConfig, 'id' | 'createdAt' | 'updatedAt'>
+
+export interface AutomationRunResult {
+  automationId: string
+  webAppId: string
+  dispatched: boolean
+  message: string
+}

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
-import type { AutomationConfig, AutomationDraft } from '@/types/automation'
+import type { AutomationConfig, AutomationDraft, AutomationRunResult } from '@/types/automation'
 
 const STORAGE_KEY = 'bandoo-webforge.automations'
 
@@ -55,6 +55,16 @@ export const useAutomationStore = defineStore('automations', {
         this.items = this.items.filter((item) => item.id !== id)
         writeLocal(this.items)
       }
+    },
+    async execute(id: string) {
+      const automation = this.items.find((item) => item.id === id)
+      if (!automation) {
+        throw new Error('Automation not found')
+      }
+      if (!isTauriRuntime()) {
+        throw new Error('Automation execution is only available in the Tauri runtime')
+      }
+      return await invoke<AutomationRunResult>('execute_automation', { automation })
     },
   },
 })

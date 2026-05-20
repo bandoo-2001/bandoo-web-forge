@@ -10,8 +10,8 @@ use tauri::{
 };
 
 use crate::models::{
-    AutomationConfig, DesktopIntegrationResult, PromptTemplate, RuntimeInfo, UserScriptConfig,
-    WebApp,
+    AutomationConfig, AutomationRunResult, DesktopIntegrationResult, DesktopIntegrationStatus,
+    PromptTemplate, RuntimeInfo, UserScriptConfig, WebApp,
 };
 
 #[tauri::command]
@@ -55,6 +55,11 @@ fn remove_desktop_entry(id: String, target: String) -> Result<DesktopIntegration
 }
 
 #[tauri::command]
+fn desktop_integration_statuses(id: String) -> Result<Vec<DesktopIntegrationStatus>, String> {
+    platform::desktop_integration_statuses(&id)
+}
+
+#[tauri::command]
 fn launch_webapp(app: AppHandle, id: String) -> Result<(), String> {
     runtime::launch_webapp(app, id)
 }
@@ -75,6 +80,14 @@ fn upsert_automation(
 #[tauri::command]
 fn delete_automation(app: AppHandle, id: String) -> Result<Vec<AutomationConfig>, String> {
     storage::delete_automation(&app, &id)
+}
+
+#[tauri::command]
+fn execute_automation(
+    app: AppHandle,
+    automation: AutomationConfig,
+) -> Result<AutomationRunResult, String> {
+    runtime::execute_automation(app, automation)
 }
 
 #[tauri::command]
@@ -155,10 +168,12 @@ pub fn run() {
             delete_webapp,
             install_desktop_entry,
             remove_desktop_entry,
+            desktop_integration_statuses,
             launch_webapp,
             list_automations,
             upsert_automation,
             delete_automation,
+            execute_automation,
             list_user_scripts,
             upsert_user_script,
             delete_user_script,

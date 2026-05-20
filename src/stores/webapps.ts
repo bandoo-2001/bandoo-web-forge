@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import type {
   DesktopIntegrationResult,
+  DesktopIntegrationStatus,
   DesktopIntegrationTarget,
   WebApp,
   WebAppDraft,
@@ -136,6 +137,12 @@ export const useWebAppStore = defineStore('webapps', {
         throw new Error('Desktop integration is only available in the Tauri runtime')
       }
       return await invoke<DesktopIntegrationResult>('remove_desktop_entry', { id, target })
+    },
+    async integrationStatuses(id: string) {
+      if (!isTauriRuntime()) {
+        return [] as DesktopIntegrationStatus[]
+      }
+      return await invoke<DesktopIntegrationStatus[]>('desktop_integration_statuses', { id })
     },
   },
 })

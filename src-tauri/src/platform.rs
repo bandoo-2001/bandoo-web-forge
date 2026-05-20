@@ -6,7 +6,7 @@ use std::os::unix::fs::PermissionsExt;
 use tauri::AppHandle;
 
 use crate::{
-    models::{DesktopIntegrationResult, RuntimeInfo, WebApp},
+    models::{DesktopIntegrationResult, DesktopIntegrationStatus, RuntimeInfo, WebApp},
     storage,
 };
 
@@ -34,6 +34,18 @@ impl DesktopIntegrationTarget {
             "autostart" => Ok(Self::Autostart),
             value => Err(format!("Unsupported desktop integration target: {value}")),
         }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Applications => "applications",
+            Self::Desktop => "desktop",
+            Self::Autostart => "autostart",
+        }
+    }
+
+    fn all() -> [Self; 3] {
+        [Self::Applications, Self::Desktop, Self::Autostart]
     }
 }
 
@@ -78,6 +90,26 @@ pub fn remove_desktop_entry(
         path: path.display().to_string(),
         installed: false,
     })
+}
+
+pub fn desktop_integration_statuses(
+    webapp_id: &str,
+) -> Result<Vec<DesktopIntegrationStatus>, String> {
+    if !cfg!(target_os = "linux") {
+        return Ok(Vec::new());
+    }
+
+    DesktopIntegrationTarget::all()
+        .into_iter()
+        .map(|target| {
+            let path = desktop_entry_path(target, webapp_id)?;
+            Ok(DesktopIntegrationStatus {
+                target: target.as_str().to_string(),
+                installed: path.exists(),
+                path: path.display().to_string(),
+            })
+        })
+        .collect()
 }
 
 fn desktop_entry_path(

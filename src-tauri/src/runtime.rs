@@ -4,7 +4,7 @@ use tauri::{
 use url::Url;
 
 use crate::{
-    models::{WebApp, WebAppWindowState},
+    models::{AutomationAction, AutomationConfig, AutomationRunResult, WebApp, WebAppWindowState},
     storage,
 };
 
@@ -145,6 +145,84 @@ fn bridge_script(webapp: &WebApp) -> Result<String, String> {
         hash: location.hash
       }}),
       notify,
+      clipboard: Object.freeze({{
+        readText: async () => {{
+          if (!permissions.clipboard || !navigator.clipboard?.readText) throw new Error('Clipboard read is not permitted');
+          return await navigator.clipboard.readText();
+        }},
+        writeText: async (text) => {{
+          if (!permissions.clipboard || !navigator.clipboard?.writeText) throw new Error('Clipboard write is not permitted');
+          await navigator.clipboard.writeText(String(text ?? ''));
+          return true;
+        }}
+      }}),
+      page: Object.freeze({{
+        query: (selector) => document.querySelector(String(selector)),
+        focus: (selector) => {{
+          const element = document.querySelector(String(selector));
+          if (!element) throw new Error(`Element not found: ${{selector}}`);
+          element.focus();
+          return true;
+        }},
+        click: (selector) => {{
+          const element = document.querySelector(String(selector));
+          if (!element) throw new Error(`Element not found: ${{selector}}`);
+          element.click();
+          return true;
+        }},
+        type: (selector, text) => {{
+          const element = document.querySelector(String(selector));
+          if (!element) throw new Error(`Element not found: ${{selector}}`);
+          element.focus();
+          const value = String(text ?? '');
+          if ('value' in element) {{
+            element.value = value;
+            element.dispatchEvent(new InputEvent('input', {{ bubbles: true, inputType: 'insertText', data: value }}));
+            element.dispatchEvent(new Event('change', {{ bubbles: true }}));
+          }} else {{
+            element.textContent = value;
+            element.dispatchEvent(new InputEvent('input', {{ bubbles: true, inputType: 'insertText', data: value }}));
+          }}
+          return true;
+        }}
+      }}),
+      automation: Object.freeze({{
+        run: async (actions) => {{
+          let clipboard = '';
+          for (const [index, action] of actions.entries()) {{
+            try {{
+              switch (action.kind) {{
+                case 'clipboard-read':
+                  clipboard = await window.__BANDOO__.clipboard.readText();
+                  break;
+                case 'clipboard-write':
+                  await window.__BANDOO__.clipboard.writeText(action.text ?? action.value ?? '');
+                  break;
+                case 'page-focus':
+                  window.__BANDOO__.page.focus(action.selector);
+                  break;
+                case 'page-click':
+                  window.__BANDOO__.page.click(action.selector);
+                  break;
+                case 'page-type':
+                  window.__BANDOO__.page.type(action.selector || ':focus', String(action.text ?? '').replaceAll('{{clipboard}}', clipboard));
+                  break;
+                case 'notify':
+                  await window.__BANDOO__.notify(action.text || 'Bandoo WebForge', action.value || '');
+                  break;
+                case 'js':
+                  Function(action.script || '')();
+                  break;
+                default:
+                  throw new Error(`Unsupported action kind: ${{action.kind}}`);
+              }}
+            }} catch (error) {{
+              throw new Error(`Step ${{index + 1}} failed (${{action.kind}}): ${{error.message || error}}`);
+            }}
+          }}
+          return {{ ok: true, steps: actions.length }};
+        }}
+      }}),
       onRouteChange: (handler) => {{
         window.addEventListener('bandoo:route-change', (event) => handler(event.detail));
       }}
@@ -211,4 +289,69 @@ pub fn launch_webapp(app: AppHandle, id: String) -> Result<(), String> {
     attach_window_state_tracking(app, webapp.id, &window);
 
     Ok(())
+}
+
+pub fn execute_automation(
+    app: AppHandle,
+    automation: AutomationConfig,
+) -> Result<AutomationRunResult, String> {
+    if !automation.enabled {
+        return Ok(AutomationRunResult {
+            automation_id: automation.id,
+            web_app_id: automation.web_app_id,
+            dispatched: false,
+            message: "Automation is disabled".to_string(),
+        });
+    }
+
+    let webapp_id = automation.web_app_id.clone();
+    if webapp_id.trim().is_empty() {
+        return Err("Automation must be bound to a WebApp before execution".to_string());
+    }
+
+    launch_webapp(app.clone(), webapp_id.clone())?;
+    let label = window_label(&webapp_id);
+    let window = app
+        .get_webview_window(&label)
+        .ok_or_else(|| "WebApp window was not found after launch".to_string())?;
+
+    let actions = sanitize_actions(&automation.actions);
+    let actions_json = serde_json::to_string(&actions).map_err(|error| error.to_string())?;
+    let script = format!(
+        r#"
+(async () => {{
+  if (!window.__BANDOO__?.automation?.run) throw new Error('Bandoo automation bridge is not available');
+  await window.__BANDOO__.automation.run({actions_json});
+}})().catch((error) => {{
+  console.error('[Bandoo automation]', error);
+}});
+"#
+    );
+    window.eval(script).map_err(|error| error.to_string())?;
+
+    Ok(AutomationRunResult {
+        automation_id: automation.id,
+        web_app_id: webapp_id,
+        dispatched: true,
+        message: "Automation was dispatched to the WebApp window".to_string(),
+    })
+}
+
+fn sanitize_actions(actions: &[AutomationAction]) -> Vec<AutomationAction> {
+    actions
+        .iter()
+        .filter(|action| {
+            matches!(
+                action.kind.as_str(),
+                "clipboard-read"
+                    | "clipboard-write"
+                    | "page-focus"
+                    | "page-click"
+                    | "page-type"
+                    | "notify"
+                    | "js"
+            )
+        })
+        .cloned()
+        .collect()
 }

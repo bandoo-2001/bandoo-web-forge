@@ -18,6 +18,27 @@ declare global {
         hash: string
       }
       notify: (title: string, body?: string) => Promise<boolean>
+      clipboard: {
+        readText: () => Promise<string>
+        writeText: (text: string) => Promise<boolean>
+      }
+      page: {
+        query: (selector: string) => Element | null
+        focus: (selector: string) => boolean
+        click: (selector: string) => boolean
+        type: (selector: string, text: string) => boolean
+      }
+      automation: {
+        run: (
+          actions: Array<{
+            kind: string
+            selector?: string
+            text?: string
+            script?: string
+            value?: string
+          }>,
+        ) => Promise<{ ok: boolean; steps: number }>
+      }
       onRouteChange: (
         handler: (route: {
           href: string

@@ -36,5 +36,17 @@ onMounted(() => {
     <label><input type="checkbox" checked /> 默认最小权限</label>
     <label><input type="checkbox" /> 允许 Shell 权限申请</label>
     <label><input type="checkbox" /> 启用用户脚本实验能力</label>
+
+    <h2>Bridge 诊断</h2>
+    <div class="bridge-grid">
+      <span>注入对象</span>
+      <code>window.__BANDOO__</code>
+      <span>页面 API</span>
+      <code>app, permissions, page, clipboard, automation, notify</code>
+      <span>路由事件</span>
+      <code>bandoo:route-change</code>
+      <span>验证方式</span>
+      <code>window.__BANDOO__?.getRoute()</code>
+    </div>
   </section>
 </template>

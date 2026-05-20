@@ -51,3 +51,9 @@ export interface DesktopIntegrationResult {
   path: string
   installed: boolean
 }
+
+export interface DesktopIntegrationStatus {
+  target: DesktopIntegrationTarget
+  path: string
+  installed: boolean
+}

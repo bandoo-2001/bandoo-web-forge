@@ -226,6 +226,30 @@ input[type='checkbox'] {
   background: #d1fae5;
 }
 
+.icon-preview {
+  width: 56px;
+  height: 56px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  object-fit: contain;
+  background: #f8fafc;
+}
+
+.activity-log {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafc;
+
+  span {
+    color: #64748b;
+    font-size: 13px;
+  }
+}
+
 .panel-title,
 .app-item {
   display: flex;
@@ -342,6 +366,21 @@ input[type='checkbox'] {
 
   span {
     color: #64748b;
+  }
+}
+
+.bridge-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 10px 18px;
+
+  span {
+    color: #64748b;
+  }
+
+  code {
+    white-space: normal;
+    word-break: break-word;
   }
 }
 

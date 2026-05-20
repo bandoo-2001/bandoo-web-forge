@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useWebAppStore } from '@/stores/webapps'
-import type { DesktopIntegrationTarget } from '@/types/webapp'
+import type { DesktopIntegrationStatus, DesktopIntegrationTarget } from '@/types/webapp'
 import type { WebApp, WebAppDraft } from '@/types/webapp'
 
 const store = useWebAppStore()
@@ -11,6 +11,8 @@ const editingId = ref<string | null>(null)
 const errorMessage = ref('')
 const statusMessage = ref('')
 const importText = ref('')
+const activityLog = ref<string[]>([])
+const integrationStatuses = reactive<Record<string, DesktopIntegrationStatus[]>>({})
 
 function defaultDraft(): WebAppDraft {
   return {
@@ -44,6 +46,11 @@ function defaultDraft(): WebAppDraft {
 const draft = reactive<WebAppDraft>(defaultDraft())
 const formTitle = computed(() => (editingId.value ? '编辑 WebApp' : '创建 WebApp'))
 const submitText = computed(() => (editingId.value ? '保存修改' : '创建应用'))
+const iconPreview = computed(() => draft.icon?.trim() || '')
+
+function log(message: string) {
+  activityLog.value = [`${new Date().toLocaleTimeString()} ${message}`, ...activityLog.value].slice(0, 6)
+}
 
 function assignDraft(nextDraft: WebAppDraft) {
   Object.assign(draft, {
@@ -112,14 +119,27 @@ async function submit() {
     errorMessage.value = ''
     statusMessage.value = ''
     const payload = normalizedDraft()
+    const riskyPermissions = []
+    if (payload.permissions.shell) riskyPermissions.push('Shell')
+    if (payload.permissions.filesystem) riskyPermissions.push('文件系统')
+    if (
+      riskyPermissions.length > 0 &&
+      !window.confirm(`将开启高风险权限：${riskyPermissions.join('、')}。确认继续？`)
+    ) {
+      return
+    }
+
     if (editingId.value) {
       await store.update(editingId.value, payload)
       statusMessage.value = '已保存修改'
+      log(`保存 WebApp：${payload.name}`)
     } else {
       await store.create(payload)
       statusMessage.value = '已创建应用'
+      log(`创建 WebApp：${payload.name}`)
     }
     resetForm()
+    await refreshAllIntegrationStatuses()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : String(error)
   }
@@ -130,6 +150,7 @@ async function launch(id: string) {
     errorMessage.value = ''
     await store.launch(id)
     statusMessage.value = '已发送启动请求'
+    log(`启动 WebApp：${id}`)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : String(error)
   }
@@ -140,6 +161,8 @@ async function install(app: WebApp, target: DesktopIntegrationTarget) {
     errorMessage.value = ''
     const result = await store.installIntegration(app.id, target)
     statusMessage.value = `已写入 ${result.path}`
+    log(`安装 ${app.name} 的 ${target} 入口`)
+    await refreshIntegrationStatus(app.id)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : String(error)
   }
@@ -150,6 +173,8 @@ async function uninstall(app: WebApp, target: DesktopIntegrationTarget) {
     errorMessage.value = ''
     const result = await store.removeIntegration(app.id, target)
     statusMessage.value = `已移除 ${result.path}`
+    log(`移除 ${app.name} 的 ${target} 入口`)
+    await refreshIntegrationStatus(app.id)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : String(error)
   }
@@ -168,16 +193,42 @@ function exportJson() {
 async function importJson() {
   try {
     errorMessage.value = ''
+    if (!importText.value.trim()) {
+      throw new Error('请先粘贴 WebApp JSON 数组')
+    }
     await store.importJson(importText.value)
     importText.value = ''
     statusMessage.value = '已导入 WebApp 配置'
+    log('导入 WebApp JSON 配置')
+    await refreshAllIntegrationStatuses()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : String(error)
   }
 }
 
+async function remove(app: WebApp) {
+  if (!window.confirm(`确认删除 ${app.name}？此操作会删除 WebApp 配置。`)) {
+    return
+  }
+  await store.remove(app.id)
+  delete integrationStatuses[app.id]
+  log(`删除 WebApp：${app.name}`)
+}
+
+async function refreshIntegrationStatus(id: string) {
+  integrationStatuses[id] = await store.integrationStatuses(id)
+}
+
+async function refreshAllIntegrationStatuses() {
+  await Promise.all(items.value.map((item) => refreshIntegrationStatus(item.id)))
+}
+
+function installed(app: WebApp, target: DesktopIntegrationTarget) {
+  return integrationStatuses[app.id]?.find((item) => item.target === target)?.installed ?? false
+}
+
 onMounted(() => {
-  void store.load()
+  void store.load().then(refreshAllIntegrationStatuses)
 })
 </script>
 
@@ -207,6 +258,7 @@ onMounted(() => {
         <span>图标路径</span>
         <input v-model="draft.icon" placeholder="Linux .desktop 可复用本地图标路径" />
       </label>
+      <img v-if="iconPreview" class="icon-preview" :src="iconPreview" alt="" />
       <label>
         <span>UserAgent</span>
         <input v-model="draft.userAgent" placeholder="留空则使用系统 WebView 默认值" />
@@ -250,6 +302,10 @@ onMounted(() => {
       </div>
       <p v-if="errorMessage" class="message error">{{ errorMessage }}</p>
       <p v-if="statusMessage" class="message success">{{ statusMessage }}</p>
+      <div v-if="activityLog.length > 0" class="activity-log">
+        <strong>最近操作</strong>
+        <span v-for="entry in activityLog" :key="entry">{{ entry }}</span>
+      </div>
 
       <div v-if="items.length === 0" class="empty-state">还没有 WebApp，先创建一个。</div>
 
@@ -260,6 +316,11 @@ onMounted(() => {
           <small v-if="app.lastWindowState">
             {{ app.lastWindowState.width }} × {{ app.lastWindowState.height }}
           </small>
+          <small>
+            菜单 {{ installed(app, 'applications') ? '已安装' : '未安装' }} · 桌面
+            {{ installed(app, 'desktop') ? '已安装' : '未安装' }} · 自启动
+            {{ installed(app, 'autostart') ? '已启用' : '未启用' }}
+          </small>
         </div>
         <div class="app-actions">
           <button type="button" @click="launch(app.id)">启动</button>
@@ -268,7 +329,7 @@ onMounted(() => {
           <button type="button" @click="install(app, 'desktop')">桌面入口</button>
           <button type="button" @click="install(app, 'autostart')">自启动</button>
           <button type="button" @click="uninstall(app, 'autostart')">取消自启动</button>
-          <button type="button" class="danger" @click="store.remove(app.id)">删除</button>
+          <button type="button" class="danger" @click="remove(app)">删除</button>
         </div>
       </article>
 

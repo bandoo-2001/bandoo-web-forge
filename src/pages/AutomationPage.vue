@@ -6,6 +6,10 @@ import type { AutomationDraft } from '@/types/automation'
 
 const store = useAutomationStore()
 const { items, loading } = storeToRefs(store)
+const message = reactive({
+  type: '',
+  text: '',
+})
 
 const draft = reactive<AutomationDraft>({
   webAppId: '',
@@ -35,6 +39,19 @@ async function submit() {
     conditions: draft.conditions.map((item) => ({ ...item })),
     actions: draft.actions.map((item) => ({ ...item })),
   })
+  message.type = 'success'
+  message.text = '已保存工作流'
+}
+
+async function execute(id: string) {
+  try {
+    const result = await store.execute(id)
+    message.type = result.dispatched ? 'success' : 'error'
+    message.text = result.message
+  } catch (error) {
+    message.type = 'error'
+    message.text = error instanceof Error ? error.message : String(error)
+  }
 }
 
 onMounted(() => {
@@ -97,12 +114,14 @@ onMounted(() => {
         <h2>工作流列表</h2>
         <span v-if="loading">加载中</span>
       </div>
+      <p v-if="message.text" class="message" :class="message.type">{{ message.text }}</p>
       <article v-for="item in items" :key="item.id" class="app-item">
         <div>
           <strong>{{ item.name }}</strong>
-          <span>{{ item.trigger.kind }} · {{ item.trigger.shortcut || item.trigger.url || '无参数' }}</span>
+          <span>{{ item.webAppId || '未绑定 WebApp' }} · {{ item.trigger.kind }} · {{ item.trigger.shortcut || item.trigger.url || '无参数' }}</span>
         </div>
         <div class="app-actions">
+          <button type="button" @click="execute(item.id)">执行</button>
           <button type="button" class="danger" @click="store.remove(item.id)">删除</button>
         </div>
       </article>

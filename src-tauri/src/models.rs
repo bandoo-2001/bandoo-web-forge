@@ -149,6 +149,23 @@ pub struct DesktopIntegrationResult {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DesktopIntegrationStatus {
+    pub target: String,
+    pub path: String,
+    pub installed: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationRunResult {
+    pub automation_id: String,
+    pub web_app_id: String,
+    pub dispatched: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeInfo {
     pub os: &'static str,
     pub family: &'static str,
