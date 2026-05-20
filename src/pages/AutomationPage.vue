@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { onMounted, reactive } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useAutomationStore } from '@/stores/automations'
-import type { AutomationDraft } from '@/types/automation'
+import type { AutomationDraft, AutomationRunResult } from '@/types/automation'
 
 const store = useAutomationStore()
 const { items, loading } = storeToRefs(store)
@@ -10,6 +10,12 @@ const message = reactive({
   type: '',
   text: '',
 })
+const lastResult = ref<AutomationRunResult | null>(null)
+const enabledShortcuts = computed(() =>
+  items.value
+    .filter((item) => item.enabled && item.trigger.kind === 'shortcut' && item.trigger.shortcut)
+    .map((item) => item.trigger.shortcut),
+)
 
 const draft = reactive<AutomationDraft>({
   webAppId: '',
@@ -27,12 +33,14 @@ const draft = reactive<AutomationDraft>({
   ],
   actions: [
     { kind: 'clipboard-read' },
-    { kind: 'page-focus', selector: 'textarea' },
-    { kind: 'page-type', text: '{{clipboard}}' },
+    { kind: 'page-focus', selector: '#prompt-textarea, [data-testid="prompt-textarea"], textarea, [contenteditable="true"]' },
+    { kind: 'page-type', selector: '#prompt-textarea, [data-testid="prompt-textarea"], textarea, [contenteditable="true"]', text: '{{clipboard}}' },
+    { kind: 'notify', text: 'Bandoo WebForge', value: '已填入剪贴板内容' },
   ],
 })
 
 async function submit() {
+  draft.actions[2].selector = draft.actions[1].selector
   await store.create({
     ...draft,
     trigger: { ...draft.trigger },
@@ -46,9 +54,11 @@ async function submit() {
 async function execute(id: string) {
   try {
     const result = await store.execute(id)
+    lastResult.value = result
     message.type = result.dispatched ? 'success' : 'error'
     message.text = result.message
   } catch (error) {
+    lastResult.value = null
     message.type = 'error'
     message.text = error instanceof Error ? error.message : String(error)
   }
@@ -114,7 +124,18 @@ onMounted(() => {
         <h2>工作流列表</h2>
         <span v-if="loading">加载中</span>
       </div>
+      <p class="hint">已注册快捷键：{{ enabledShortcuts.join('、') || '暂无' }}</p>
       <p v-if="message.text" class="message" :class="message.type">{{ message.text }}</p>
+      <div v-if="lastResult" class="step-results">
+        <strong>最近执行：{{ lastResult.automationId }}</strong>
+        <ol>
+          <li v-for="step in lastResult.steps" :key="`${lastResult.automationId}-${step.index}`">
+            <span>{{ step.index }}. {{ step.actionKind }}</span>
+            <em :class="step.status">{{ step.status }}</em>
+            <small>{{ step.message }}</small>
+          </li>
+        </ol>
+      </div>
       <article v-for="item in items" :key="item.id" class="app-item">
         <div>
           <strong>{{ item.name }}</strong>

@@ -10,3 +10,10 @@ export interface UserScriptConfig {
 }
 
 export type UserScriptDraft = Omit<UserScriptConfig, 'id' | 'createdAt' | 'updatedAt'>
+
+export interface UserScriptRunResult {
+  scriptId: string
+  webAppId: string
+  dispatched: boolean
+  message: string
+}

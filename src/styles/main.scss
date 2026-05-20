@@ -384,6 +384,66 @@ input[type='checkbox'] {
   }
 }
 
+.step-results {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+
+  ol {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding-left: 18px;
+  }
+
+  li {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) auto;
+    gap: 4px 10px;
+    align-items: center;
+  }
+
+  em {
+    font-style: normal;
+    font-size: 12px;
+    font-weight: 700;
+    color: #64748b;
+
+    &.failed {
+      color: #dc2626;
+    }
+
+    &.dispatched,
+    &.completed {
+      color: #15803d;
+    }
+  }
+
+  small {
+    grid-column: 1 / -1;
+    color: #64748b;
+  }
+}
+
+.script-result {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+
+  span,
+  small {
+    color: #64748b;
+    word-break: break-word;
+  }
+}
+
 @media (max-width: 820px) {
   .shell,
   .dashboard-grid {

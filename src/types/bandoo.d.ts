@@ -18,6 +18,9 @@ declare global {
         hash: string
       }
       notify: (title: string, body?: string) => Promise<boolean>
+      notification: {
+        send: (title: string, body?: string) => Promise<boolean>
+      }
       clipboard: {
         readText: () => Promise<string>
         writeText: (text: string) => Promise<boolean>
@@ -37,7 +40,36 @@ declare global {
             script?: string
             value?: string
           }>,
-        ) => Promise<{ ok: boolean; steps: number }>
+        ) => Promise<{
+          ok: boolean
+          steps: Array<{
+            index: number
+            actionKind: string
+            status: string
+            message: string
+          }>
+        }>
+      }
+      workflow: {
+        runActions: (
+          actions: Array<{
+            kind: string
+            selector?: string
+            text?: string
+            script?: string
+            value?: string
+          }>,
+        ) => Promise<{
+          ok: boolean
+          steps: Array<{
+            index: number
+            actionKind: string
+            status: string
+            message: string
+          }>
+        }>
+        sleep: (milliseconds: number) => Promise<void>
+        log: (...args: unknown[]) => void
       }
       onRouteChange: (
         handler: (route: {

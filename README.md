@@ -44,7 +44,39 @@ cargo check
 - Linux `.desktop` 集成：应用菜单入口、桌面入口、autostart 自启动入口。
 - 基础系统托盘：显示主窗口、退出。
 - WebView 初始化脚本：注入 `window.__BANDOO__`，提供应用信息、权限、标题读取、路由监听和浏览器通知。
-- 自动化、用户脚本、Prompt 模板的最小数据模型和管理页面。
+- 自动化步骤流：全局快捷键注册、绑定 WebApp 后执行、剪贴板读取、页面聚焦/输入/点击、通知和步骤级预检结果。
+- 用户脚本：绑定 WebApp、启用/禁用、手动运行 JavaScript、权限预检和运行结果展示。
+- Prompt 模板的最小数据模型和管理页面。
+
+## 自动化 MVP 示例
+
+1. 在 WebApp 管理里创建 ChatGPT WebApp，URL 使用 `https://chatgpt.com/`。
+2. 打开该 WebApp 的权限：页面、剪贴板、通知。
+3. 在自动化页面创建工作流：
+   - 绑定 WebApp ID：填入 ChatGPT WebApp 的 ID。
+   - 触发器：全局快捷键 `Ctrl+Alt+A`。
+   - URL 条件：`chatgpt.com`。
+   - 元素选择器：`#prompt-textarea, [data-testid="prompt-textarea"], textarea, [contenteditable="true"]`。
+   - 输入模板：`{{clipboard}}`。
+4. 复制一段文本到剪贴板，在 ChatGPT WebApp 窗口内按 `Ctrl+Alt+A`。
+5. 自动化会读取剪贴板、聚焦输入框、填入文本，并在允许通知时提示完成。
+
+如果快捷键保存失败，通常是格式无效或已有工作流占用了同一个快捷键。如果执行失败，先看自动化页的最近执行结果，再打开 WebApp 控制台查看 `[Bandoo automation]` 日志。
+
+## 用户脚本 MVP 示例
+
+1. 在 WebApp 管理里创建 ChatGPT WebApp，并开启页面和通知权限。
+2. 在用户脚本页面创建脚本，绑定 ChatGPT WebApp ID。
+3. 使用默认示例脚本，或填写：
+
+```js
+workflow.log('title:', bandoo.getTitle())
+workflow.log('route:', bandoo.getRoute())
+notification.send('Bandoo 用户脚本', `当前页面：${app.name}`)
+```
+
+4. 点击“运行”，Bandoo 会启动或聚焦绑定 WebApp，并把脚本派发到该 WebView。
+5. 如果权限不足、脚本停用或 WebApp 未绑定，脚本不会执行，并会在用户脚本页显示原因。页面内异常会写入 WebApp 控制台的 `[Bandoo user script]` 日志。
 
 ## 常见问题
 

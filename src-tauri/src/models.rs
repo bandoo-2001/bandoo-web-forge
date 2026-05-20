@@ -157,8 +157,27 @@ pub struct DesktopIntegrationStatus {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AutomationStepResult {
+    pub index: usize,
+    pub action_kind: String,
+    pub status: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AutomationRunResult {
     pub automation_id: String,
+    pub web_app_id: String,
+    pub dispatched: bool,
+    pub message: String,
+    pub steps: Vec<AutomationStepResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserScriptRunResult {
+    pub script_id: String,
     pub web_app_id: String,
     pub dispatched: bool,
     pub message: String,

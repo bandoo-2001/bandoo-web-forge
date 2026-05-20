@@ -81,15 +81,8 @@ pub fn read_automations(app: &AppHandle) -> Result<Vec<AutomationConfig>, String
     read_collection(app, "automations.json")
 }
 
-pub fn upsert_automation(
-    app: &AppHandle,
-    automation: AutomationConfig,
-) -> Result<Vec<AutomationConfig>, String> {
-    let mut items = read_automations(app)?;
-    items.retain(|item| item.id != automation.id);
-    items.insert(0, automation);
-    write_collection(app, "automations.json", &items)?;
-    Ok(items)
+pub fn write_automations(app: &AppHandle, items: &[AutomationConfig]) -> Result<(), String> {
+    write_collection(app, "automations.json", items)
 }
 
 pub fn delete_automation(app: &AppHandle, id: &str) -> Result<Vec<AutomationConfig>, String> {

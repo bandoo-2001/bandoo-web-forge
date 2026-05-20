@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
-import type { UserScriptConfig, UserScriptDraft } from '@/types/scripts'
+import type { UserScriptConfig, UserScriptDraft, UserScriptRunResult } from '@/types/scripts'
 
 const STORAGE_KEY = 'bandoo-webforge.user-scripts'
 
@@ -49,6 +49,16 @@ export const useScriptStore = defineStore('scripts', {
         this.items = this.items.filter((item) => item.id !== id)
         writeLocal(this.items)
       }
+    },
+    async execute(id: string) {
+      const script = this.items.find((item) => item.id === id)
+      if (!script) {
+        throw new Error('User script not found')
+      }
+      if (!isTauriRuntime()) {
+        throw new Error('User script execution is only available in the Tauri runtime')
+      }
+      return await invoke<UserScriptRunResult>('execute_user_script', { script })
     },
   },
 })

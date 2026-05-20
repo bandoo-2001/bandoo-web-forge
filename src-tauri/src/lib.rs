@@ -1,3 +1,4 @@
+mod automation;
 mod models;
 mod platform;
 mod runtime;
@@ -11,7 +12,7 @@ use tauri::{
 
 use crate::models::{
     AutomationConfig, AutomationRunResult, DesktopIntegrationResult, DesktopIntegrationStatus,
-    PromptTemplate, RuntimeInfo, UserScriptConfig, WebApp,
+    PromptTemplate, RuntimeInfo, UserScriptConfig, UserScriptRunResult, WebApp,
 };
 
 #[tauri::command]
@@ -74,12 +75,20 @@ fn upsert_automation(
     app: AppHandle,
     automation: AutomationConfig,
 ) -> Result<Vec<AutomationConfig>, String> {
-    storage::upsert_automation(&app, automation)
+    let mut items = storage::read_automations(&app)?;
+    items.retain(|item| item.id != automation.id);
+    items.insert(0, automation);
+    automation::validate_shortcuts(&items)?;
+    storage::write_automations(&app, &items)?;
+    automation::refresh_shortcuts(&app)?;
+    Ok(items)
 }
 
 #[tauri::command]
 fn delete_automation(app: AppHandle, id: String) -> Result<Vec<AutomationConfig>, String> {
-    storage::delete_automation(&app, &id)
+    let items = storage::delete_automation(&app, &id)?;
+    automation::refresh_shortcuts(&app)?;
+    Ok(items)
 }
 
 #[tauri::command]
@@ -106,6 +115,14 @@ fn upsert_user_script(
 #[tauri::command]
 fn delete_user_script(app: AppHandle, id: String) -> Result<Vec<UserScriptConfig>, String> {
     storage::delete_user_script(&app, &id)
+}
+
+#[tauri::command]
+fn execute_user_script(
+    app: AppHandle,
+    script: UserScriptConfig,
+) -> Result<UserScriptRunResult, String> {
+    runtime::execute_user_script(app, script)
 }
 
 #[tauri::command]
@@ -155,6 +172,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let handle = app.handle().clone();
+            automation::init_global_shortcuts(&handle).map_err(|error| {
+                Box::<dyn std::error::Error>::from(std::io::Error::other(error))
+            })?;
             setup_tray(&handle)?;
             runtime::launch_cli_webapp(handle).map_err(|error| {
                 Box::<dyn std::error::Error>::from(std::io::Error::other(error))
@@ -177,6 +197,7 @@ pub fn run() {
             list_user_scripts,
             upsert_user_script,
             delete_user_script,
+            execute_user_script,
             list_prompt_templates,
             upsert_prompt_template,
             delete_prompt_template

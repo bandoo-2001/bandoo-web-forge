@@ -33,9 +33,17 @@ export interface AutomationConfig {
 
 export type AutomationDraft = Omit<AutomationConfig, 'id' | 'createdAt' | 'updatedAt'>
 
+export interface AutomationStepResult {
+  index: number
+  actionKind: string
+  status: string
+  message: string
+}
+
 export interface AutomationRunResult {
   automationId: string
   webAppId: string
   dispatched: boolean
   message: string
+  steps: AutomationStepResult[]
 }
