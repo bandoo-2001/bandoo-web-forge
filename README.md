@@ -1,27 +1,59 @@
 # Bandoo WebForge
 
-增强型 WebApp/PWA 桌面运行时。目标是把任意网页转换为可增强、可自动化、可扩展的桌面应用。
+Bandoo WebForge 是一个基于 Tauri v2 的桌面运行时，用来把 WebApp/PWA 封装成更接近原生体验的桌面应用。
 
-## MVP 开发顺序
+产品方向很明确：原网页仍然是核心体验，Bandoo 在它外围补上桌面窗口、权限、脚本、自动化、快捷方式和本地集成能力。
 
-1. WebApp 管理：创建、保存、删除、独立窗口启动。
-2. 运行时增强：托盘、全局快捷键、JS 注入。
-3. 自动化系统：Trigger、Condition、Action。
-4. 用户脚本：面向 JavaScript/TypeScript 的增强 API。
+## 当前状态
 
-## 平台策略
+当前版本处于开发者内测阶段，主目标是验证 Windows 和 Linux 双平台的核心闭环：
 
-项目按多平台运行时设计，当前实现以 Linux 为主。平台相关能力集中放在 Rust 侧的 `platform` 和 `runtime` 模块，后续桌面快捷方式、开机启动、托盘菜单、系统通知等功能优先实现 Linux，再为 Windows/macOS 增加对应分支。
+- 创建、编辑、删除和启动 WebApp。
+- 使用本地 shell 承载自定义顶部栏，并在内容区域加载远程 WebView。
+- 支持全局主题和单个 WebApp 的顶部栏外观覆盖。
+- 支持窗口尺寸、位置、最大化状态保存与恢复。
+- 使用 SQLite 保存 WebApp、设置、主题、自动化、脚本和运行日志。
+- 通过受控 `window.__BANDOO__` Bridge 暴露页面、剪贴板、通知、Shell、文件系统和网络能力。
+- 高风险能力默认关闭，并在 UI 中展示风险说明和最近调用日志。
+- 支持自动化触发、步骤编辑、录制、选择器采集和执行日志。
+- 支持用户脚本手动运行、页面加载、URL 变化和快捷键运行。
+- 支持 Linux `.desktop` 入口和 Windows 快捷方式。
+- GitHub Actions 可以完成 Windows NSIS 和 Linux DEB 内测产物构建。
+
+## 安装内测版
+
+推荐使用最新 beta Release：
+
+- Windows：下载 `Bandoo.WebForge_0.1.0_x64-setup.exe`
+- Linux：下载 `Bandoo.WebForge_0.1.0_amd64.deb`
+
+发布页：
+
+- https://github.com/bandoo-2001/bandoo-web-forge/releases
+
+详细验收流程见 [docs/BETA_ACCEPTANCE.md](docs/BETA_ACCEPTANCE.md)。
 
 ## 本地开发
 
+安装依赖：
+
 ```bash
 npm install
-npm run dev
+```
+
+启动前端预览：
+
+```bash
+npm run dev -- --host 127.0.0.1
+```
+
+启动 Tauri 桌面端：
+
+```bash
 npm run tauri:dev
 ```
 
-当前机器已安装 Tauri 需要的 Ubuntu 系统依赖和 Rust stable。新 shell 如果还找不到 `cargo`，先执行：
+如果当前 shell 找不到 `cargo`，先加载 Rust 环境：
 
 ```bash
 . "$HOME/.cargo/env"
@@ -30,57 +62,54 @@ npm run tauri:dev
 ## 验证命令
 
 ```bash
+npm test
 npm run build
-. "$HOME/.cargo/env"
-cd src-tauri
-cargo fmt -- --check
-cargo check
+cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+cargo check --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-## 当前能力
+Windows 本机如果 `cargo` 不在 `PATH`，可以先加入：
 
-- WebApp 创建、编辑、删除、启动、UserAgent、自定义图标字段、窗口状态恢复。
-- WebApp 配置导入/导出 JSON。
-- Linux `.desktop` 集成：应用菜单入口、桌面入口、autostart 自启动入口。
-- 基础系统托盘：显示主窗口、退出。
-- WebView 初始化脚本：注入 `window.__BANDOO__`，提供应用信息、权限、标题读取、路由监听和浏览器通知。
-- 自动化步骤流：全局快捷键注册、绑定 WebApp 后执行、剪贴板读取、页面聚焦/输入/点击、通知和步骤级预检结果。
-- 用户脚本：绑定 WebApp、启用/禁用、手动运行 JavaScript、权限预检和运行结果展示。
-- Prompt 模板的最小数据模型和管理页面。
-
-## 自动化 MVP 示例
-
-1. 在 WebApp 管理里创建 ChatGPT WebApp，URL 使用 `https://chatgpt.com/`。
-2. 打开该 WebApp 的权限：页面、剪贴板、通知。
-3. 在自动化页面创建工作流：
-   - 绑定 WebApp ID：填入 ChatGPT WebApp 的 ID。
-   - 触发器：全局快捷键 `Ctrl+Alt+A`。
-   - URL 条件：`chatgpt.com`。
-   - 元素选择器：`#prompt-textarea, [data-testid="prompt-textarea"], textarea, [contenteditable="true"]`。
-   - 输入模板：`{{clipboard}}`。
-4. 复制一段文本到剪贴板，在 ChatGPT WebApp 窗口内按 `Ctrl+Alt+A`。
-5. 自动化会读取剪贴板、聚焦输入框、填入文本，并在允许通知时提示完成。
-
-如果快捷键保存失败，通常是格式无效或已有工作流占用了同一个快捷键。如果执行失败，先看自动化页的最近执行结果，再打开 WebApp 控制台查看 `[Bandoo automation]` 日志。
-
-## 用户脚本 MVP 示例
-
-1. 在 WebApp 管理里创建 ChatGPT WebApp，并开启页面和通知权限。
-2. 在用户脚本页面创建脚本，绑定 ChatGPT WebApp ID。
-3. 使用默认示例脚本，或填写：
-
-```js
-workflow.log('title:', bandoo.getTitle())
-workflow.log('route:', bandoo.getRoute())
-notification.send('Bandoo 用户脚本', `当前页面：${app.name}`)
+```powershell
+$env:Path = "$HOME\.cargo\bin;$env:Path"
 ```
 
-4. 点击“运行”，Bandoo 会启动或聚焦绑定 WebApp，并把脚本派发到该 WebView。
-5. 如果权限不足、脚本停用或 WebApp 未绑定，脚本不会执行，并会在用户脚本页显示原因。页面内异常会写入 WebApp 控制台的 `[Bandoo user script]` 日志。
+## 打包命令
 
-## 常见问题
+Windows NSIS：
 
-- `cargo` 找不到：执行 `. "$HOME/.cargo/env"` 后重试。
-- Tauri 提示缺 Linux 依赖：确认已安装 WebKitGTK 4.1、librsvg、build-essential、libssl-dev、libayatana-appindicator3-dev。
-- 桌面入口不可见：Linux 桌面环境可能需要重新加载应用菜单；桌面目录优先使用 `~/桌面`，不存在时使用 `~/Desktop`。
-- 浏览器预览里桌面集成不可用：`.desktop`、托盘、独立 WebView 需要在 Tauri 运行时里使用。
+```bash
+npm run tauri:build:windows
+```
+
+Linux DEB：
+
+```bash
+npm run tauri:build:linux
+```
+
+当前 Linux Release 只构建 `.deb`，AppImage/RPM 会在后续稳定后再恢复。
+
+## 项目结构
+
+- `src/`：Vue 3 前端、Pinia stores、页面和样式。
+- `src/types/`：前端共享 TypeScript 类型。
+- `src-tauri/src/`：Rust 原生层、存储、运行时、Bridge、平台集成。
+- `src-tauri/capabilities/`：Tauri v2 权限能力配置。
+- `.github/workflows/ci.yml`：检查和 Release 打包流水线。
+- `Bandoo_WebForge.md`：产品设计来源。
+
+## 安全边界
+
+- Shell、文件系统、网络权限默认关闭。
+- 远程 WebView 只能通过受控 Bridge 请求高风险能力。
+- Rust 侧按 WebApp ID、窗口 label 和权限开关做校验。
+- 高风险调用会写入本地运行日志，方便内测定位问题。
+
+## 已知限制
+
+- macOS 暂不进入本轮内测。
+- Windows 安装包未签名，安装时可能出现安全提示。
+- Linux 暂只发布 `.deb`。
+- AppImage/RPM、自动更新、代码签名和更完整的跨发行版验证属于下一轮发布工作。
