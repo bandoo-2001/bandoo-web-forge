@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.1.0-beta.3
+
+内测文档与发布卫生收口版本。
+
+### Added
+
+- 重写 README，恢复可读的中文项目入口、开发命令、打包命令和已知限制。
+- 新增 `docs/BETA_ACCEPTANCE.md`，覆盖安装、窗口、权限、自动化、脚本和桌面集成验收。
+- 新增 changelog，记录内测能力和已知限制。
+
+### Changed
+
+- Beta tag 自动标记为 GitHub prerelease。
+- Release workflow 自动生成 GitHub release notes。
+
 ## v0.1.0-beta.2
 
 内测发布入口。该版本对应提交 `d092d4d`。
