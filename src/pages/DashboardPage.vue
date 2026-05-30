@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useWebAppStore } from '@/stores/webapps'
+import { defaultChromeConfig, defaultWindowConfig, useWebAppStore } from '@/stores/webapps'
+import { useThemeStore } from '@/stores/themes'
+import { useAutomationStore } from '@/stores/automations'
 import type { DesktopIntegrationStatus, DesktopIntegrationTarget } from '@/types/webapp'
 import type { WebApp, WebAppDraft } from '@/types/webapp'
 
 const store = useWebAppStore()
+const themeStore = useThemeStore()
+const automationStore = useAutomationStore()
 const { items, loading } = storeToRefs(store)
+const { presets } = storeToRefs(themeStore)
+const { logs: runLogs } = storeToRefs(automationStore)
 const editingId = ref<string | null>(null)
 const errorMessage = ref('')
 const statusMessage = ref('')
@@ -20,11 +26,7 @@ function defaultDraft(): WebAppDraft {
     url: 'https://chatgpt.com',
     userAgent: '',
     icon: '',
-    windowConfig: {
-      width: 1280,
-      height: 860,
-      maximized: false,
-    },
+    windowConfig: defaultWindowConfig(),
     permissions: {
       page: true,
       clipboard: true,
@@ -38,6 +40,7 @@ function defaultDraft(): WebAppDraft {
       customScriptEnabled: false,
       customScript: '',
     },
+    chromeConfig: defaultChromeConfig(),
     startOnBoot: false,
     tray: true,
   }
@@ -47,6 +50,44 @@ const draft = reactive<WebAppDraft>(defaultDraft())
 const formTitle = computed(() => (editingId.value ? '编辑 WebApp' : '创建 WebApp'))
 const submitText = computed(() => (editingId.value ? '保存修改' : '创建应用'))
 const iconPreview = computed(() => draft.icon?.trim() || '')
+const highRiskCapabilities = computed(() =>
+  [
+    {
+      key: 'shell',
+      name: 'Shell',
+      active: draft.permissions.shell,
+      detail: '允许用户脚本和自动化执行本机命令。',
+    },
+    {
+      key: 'filesystem',
+      name: '文件系统',
+      active: draft.permissions.filesystem,
+      detail: '允许读取、写入、创建和删除本机文件。',
+    },
+    {
+      key: 'network',
+      name: '网络',
+      active: draft.permissions.network,
+      detail: '允许远程页面通过受控 Bridge 发起网络请求。',
+    },
+  ].filter((item) => item.active),
+)
+const recentBridgeLogs = computed(() =>
+  runLogs.value
+    .filter((item) => item.kind === 'bridge' && (!editingId.value || item.webAppId === editingId.value))
+    .slice(0, 5),
+)
+const previewControlsOnLeft = computed(() => draft.chromeConfig.controlsPosition === 'left')
+const chromePreviewFrameStyle = computed(() => ({
+  borderRadius: `${Math.min(Math.max(draft.chromeConfig.cornerRadius, 0), 32)}px`,
+  boxShadow: draft.chromeConfig.shadow ? '0 16px 40px rgb(15 23 42 / 0.16)' : 'none',
+}))
+const chromePreviewTitlebarStyle = computed(() => ({
+  minHeight: `${Math.min(Math.max(draft.chromeConfig.titlebarHeight, 32), 88)}px`,
+  backgroundColor: draft.chromeConfig.backgroundColor,
+  color: draft.chromeConfig.foregroundColor,
+  opacity: draft.chromeConfig.enabled ? draft.chromeConfig.opacity : 0.35,
+}))
 
 function log(message: string) {
   activityLog.value = [`${new Date().toLocaleTimeString()} ${message}`, ...activityLog.value].slice(0, 6)
@@ -58,6 +99,7 @@ function assignDraft(nextDraft: WebAppDraft) {
     windowConfig: { ...nextDraft.windowConfig },
     permissions: { ...nextDraft.permissions },
     scriptConfig: { ...nextDraft.scriptConfig },
+    chromeConfig: { ...nextDraft.chromeConfig },
   })
 }
 
@@ -79,6 +121,9 @@ function edit(app: WebApp) {
       width: app.windowConfig.width,
       height: app.windowConfig.height,
       maximized: app.windowConfig.maximized ?? false,
+      transparent: app.windowConfig.transparent ?? true,
+      decorations: app.windowConfig.decorations ?? false,
+      stableFallback: app.windowConfig.stableFallback ?? true,
     },
     permissions: {
       clipboard: app.permissions.clipboard,
@@ -92,6 +137,10 @@ function edit(app: WebApp) {
       injectBridge: app.scriptConfig?.injectBridge ?? true,
       customScriptEnabled: app.scriptConfig?.customScriptEnabled ?? false,
       customScript: app.scriptConfig?.customScript ?? '',
+    },
+    chromeConfig: {
+      ...defaultChromeConfig(),
+      ...app.chromeConfig,
     },
   })
 }
@@ -111,6 +160,7 @@ function normalizedDraft(): WebAppDraft {
     windowConfig: { ...draft.windowConfig },
     permissions: { ...draft.permissions },
     scriptConfig: { ...draft.scriptConfig },
+    chromeConfig: { ...draft.chromeConfig },
   }
 }
 
@@ -122,6 +172,7 @@ async function submit() {
     const riskyPermissions = []
     if (payload.permissions.shell) riskyPermissions.push('Shell')
     if (payload.permissions.filesystem) riskyPermissions.push('文件系统')
+    if (payload.permissions.network) riskyPermissions.push('网络')
     if (
       riskyPermissions.length > 0 &&
       !window.confirm(`将开启高风险权限：${riskyPermissions.join('、')}。确认继续？`)
@@ -228,7 +279,7 @@ function installed(app: WebApp, target: DesktopIntegrationTarget) {
 }
 
 onMounted(() => {
-  void store.load().then(refreshAllIntegrationStatuses)
+  void Promise.all([store.load(), themeStore.load(), automationStore.loadLogs()]).then(refreshAllIntegrationStatuses)
 })
 </script>
 
@@ -283,6 +334,111 @@ onMounted(() => {
         <label><input v-model="draft.tray" type="checkbox" /> 托盘</label>
         <label><input v-model="draft.startOnBoot" type="checkbox" /> 开机启动</label>
         <label><input v-model="draft.windowConfig.maximized" type="checkbox" /> 默认最大化</label>
+        <label><input v-model="draft.windowConfig.transparent" type="checkbox" /> 透明窗口</label>
+        <label><input v-model="draft.windowConfig.decorations" type="checkbox" /> 系统标题栏</label>
+      </div>
+      <div v-if="highRiskCapabilities.length > 0" class="risk-panel">
+        <strong>高风险权限已开启</strong>
+        <ul>
+          <li v-for="capability in highRiskCapabilities" :key="capability.key">
+            <span>{{ capability.name }}</span>
+            <small>{{ capability.detail }}</small>
+          </li>
+        </ul>
+        <div v-if="recentBridgeLogs.length > 0" class="risk-log">
+          <span>最近 Bridge 调用</span>
+          <small v-for="log in recentBridgeLogs" :key="log.id">
+            {{ new Date(log.startedAt).toLocaleTimeString() }} · {{ log.sourceId }} · {{ log.status }} · {{ log.message }}
+          </small>
+        </div>
+      </div>
+      <div class="appearance-editor">
+        <h3>窗口个性化</h3>
+        <label>
+          <span>主题预设</span>
+          <select v-model="draft.chromeConfig.themePresetId">
+            <option value="">不使用预设</option>
+            <option v-for="preset in presets" :key="preset.id" :value="preset.id">
+              {{ preset.name }}
+            </option>
+          </select>
+        </label>
+        <div class="field-row">
+          <label>
+            <span>顶部栏高度</span>
+            <input v-model.number="draft.chromeConfig.titlebarHeight" type="number" min="32" max="88" />
+          </label>
+          <label>
+            <span>窗口圆角</span>
+            <input v-model.number="draft.chromeConfig.cornerRadius" type="number" min="0" max="32" />
+          </label>
+        </div>
+        <div class="field-row">
+          <label>
+            <span>顶部栏背景</span>
+            <input v-model="draft.chromeConfig.backgroundColor" type="color" />
+          </label>
+          <label>
+            <span>文字颜色</span>
+            <input v-model="draft.chromeConfig.foregroundColor" type="color" />
+          </label>
+        </div>
+        <label>
+          <span>透明度 {{ Math.round(draft.chromeConfig.opacity * 100) }}%</span>
+          <input v-model.number="draft.chromeConfig.opacity" type="range" min="0.72" max="1" step="0.01" />
+        </label>
+        <div class="field-row">
+          <label>
+            <span>窗口按钮位置</span>
+            <select v-model="draft.chromeConfig.controlsPosition">
+              <option value="right">右侧</option>
+              <option value="left">左侧</option>
+            </select>
+          </label>
+          <label>
+            <span>按钮风格</span>
+            <select v-model="draft.chromeConfig.controlsStyle">
+              <option value="windows">Windows</option>
+              <option value="traffic-light">Traffic light</option>
+              <option value="minimal">Minimal</option>
+            </select>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <label><input v-model="draft.chromeConfig.enabled" type="checkbox" /> 自绘顶部栏</label>
+          <label><input v-model="draft.chromeConfig.shadow" type="checkbox" /> 阴影</label>
+          <label><input v-model="draft.chromeConfig.showTitle" type="checkbox" /> 标题</label>
+          <label><input v-model="draft.chromeConfig.showIcon" type="checkbox" /> 图标</label>
+          <label><input v-model="draft.chromeConfig.showUrl" type="checkbox" /> URL</label>
+        </div>
+        <div class="chrome-preview" :style="chromePreviewFrameStyle">
+          <div
+            class="chrome-preview-titlebar"
+            :class="[`controls-${draft.chromeConfig.controlsPosition}`, `style-${draft.chromeConfig.controlsStyle}`]"
+            :style="chromePreviewTitlebarStyle"
+          >
+            <div v-if="previewControlsOnLeft" class="window-controls">
+              <span class="control close" />
+              <span class="control minimize" />
+              <span class="control maximize" />
+            </div>
+            <div class="titlebar-identity">
+              <span v-if="draft.chromeConfig.showIcon" class="fallback-icon">B</span>
+              <div>
+                <strong v-if="draft.chromeConfig.showTitle">{{ draft.name || 'Bandoo WebApp' }}</strong>
+                <small v-if="draft.chromeConfig.showUrl">{{ draft.url || 'https://example.com' }}</small>
+              </div>
+            </div>
+            <div v-if="!previewControlsOnLeft" class="window-controls">
+              <span class="control minimize" />
+              <span class="control maximize" />
+              <span class="control close" />
+            </div>
+          </div>
+          <div class="chrome-preview-content">
+            <span>{{ draft.url || 'https://example.com' }}</span>
+          </div>
+        </div>
       </div>
       <div class="toggle-row">
         <label><input v-model="draft.scriptConfig.injectBridge" type="checkbox" /> 注入 Bridge</label>

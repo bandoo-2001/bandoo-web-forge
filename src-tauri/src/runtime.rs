@@ -1,18 +1,34 @@
-use tauri::{
-    AppHandle, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
-};
+use tauri::webview::WebviewBuilder;
+use tauri::window::{Window, WindowBuilder};
+use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Runtime, WebviewUrl, WindowEvent};
 use url::Url;
 
 use crate::{
     models::{
-        AutomationAction, AutomationConfig, AutomationRunResult, AutomationStepResult,
-        UserScriptConfig, UserScriptRunResult, WebApp, WebAppPermissions, WebAppWindowState,
+        AutomationAction, AutomationConfig, AutomationRunLog, AutomationRunResult,
+        AutomationStepResult, UserScriptConfig, UserScriptRunResult, WebApp, WebAppPermissions,
+        WebAppWindowState,
     },
     storage,
 };
 
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 fn window_label(id: &str) -> String {
     format!("webapp-{id}")
+}
+
+fn shell_label(id: &str) -> String {
+    format!("webapp-{id}-shell")
+}
+
+fn content_label(id: &str) -> String {
+    format!("webapp-{id}-content")
 }
 
 fn validate_url(raw_url: &str) -> Result<Url, String> {
@@ -26,9 +42,7 @@ fn validate_url(raw_url: &str) -> Result<Url, String> {
     }
 }
 
-fn capture_window_state<R: Runtime>(
-    window: &WebviewWindow<R>,
-) -> Result<WebAppWindowState, String> {
+fn capture_window_state<R: Runtime>(window: &Window<R>) -> Result<WebAppWindowState, String> {
     let position = window.outer_position().map_err(|error| error.to_string())?;
     let size = window.inner_size().map_err(|error| error.to_string())?;
     let maximized = window.is_maximized().map_err(|error| error.to_string())?;
@@ -42,13 +56,13 @@ fn capture_window_state<R: Runtime>(
     })
 }
 
-fn persist_window_state<R: Runtime>(app: &AppHandle, id: &str, window: &WebviewWindow<R>) {
+fn persist_window_state<R: Runtime>(app: &AppHandle, id: &str, window: &Window<R>) {
     if let Ok(state) = capture_window_state(window) {
         let _ = storage::update_window_state(app, id, state);
     }
 }
 
-fn attach_window_state_tracking<R: Runtime>(app: AppHandle, id: String, window: &WebviewWindow<R>) {
+fn attach_window_state_tracking<R: Runtime>(app: AppHandle, id: String, window: &Window<R>) {
     let tracked_window = window.clone();
     window.on_window_event(move |event| match event {
         WindowEvent::Moved(_)
@@ -59,17 +73,21 @@ fn attach_window_state_tracking<R: Runtime>(app: AppHandle, id: String, window: 
     });
 }
 
-fn configured_builder<'a>(
-    app: &'a AppHandle,
+fn configured_shell_window(
+    app: &AppHandle,
     label: String,
     webapp: &WebApp,
-) -> Result<WebviewWindowBuilder<'a, tauri::Wry, AppHandle>, String> {
-    let url = validate_url(&webapp.url)?;
-    let mut builder = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
+) -> Result<Window<tauri::Wry>, String> {
+    validate_url(&webapp.url)?;
+
+    let chrome = webapp.chrome_config.clone().unwrap_or_default();
+    let mut builder = WindowBuilder::new(app, label.clone())
         .title(&webapp.name)
         .inner_size(webapp.window_config.width, webapp.window_config.height)
-        .min_inner_size(480.0, 360.0)
-        .initialization_script(bridge_script(webapp)?);
+        .min_inner_size(640.0, 420.0)
+        .decorations(webapp.window_config.decorations)
+        .transparent(webapp.window_config.transparent)
+        .shadow(chrome.shadow);
 
     if let Some(state) = &webapp.last_window_state {
         builder = builder
@@ -82,18 +100,92 @@ fn configured_builder<'a>(
         builder = builder.center();
     }
 
+    let window = builder.build().map_err(|error| error.to_string())?;
+    let titlebar_height = if chrome.enabled {
+        chrome.titlebar_height.max(32.0)
+    } else {
+        0.0
+    };
+    let width = webapp.window_config.width;
+    let height = webapp.window_config.height;
+
+    let user_scripts_json = user_scripts_json(app, webapp)?;
+    let automations_json = automations_json(app, webapp)?;
+    let shell_url = WebviewUrl::App(format!("index.html#/shell/{}", webapp.id).into());
+    let shell = WebviewBuilder::new(shell_label(&webapp.id), shell_url)
+        .transparent(webapp.window_config.transparent)
+        .auto_resize();
+    window
+        .add_child(
+            shell,
+            LogicalPosition::new(0.0, 0.0),
+            LogicalSize::new(width, titlebar_height),
+        )
+        .map_err(|error| error.to_string())?;
+
+    let mut content = WebviewBuilder::new(
+        content_label(&webapp.id),
+        WebviewUrl::External(validate_url(&webapp.url)?),
+    )
+    .initialization_script(bridge_script_with_payloads(
+        webapp,
+        &user_scripts_json,
+        &automations_json,
+    )?)
+    .auto_resize();
+
     if let Some(user_agent) = webapp
         .user_agent
         .as_ref()
         .filter(|value| !value.trim().is_empty())
     {
-        builder = builder.user_agent(user_agent);
+        content = content.user_agent(user_agent);
     }
 
-    Ok(builder)
+    window
+        .add_child(
+            content,
+            LogicalPosition::new(0.0, titlebar_height),
+            LogicalSize::new(width, (height - titlebar_height).max(320.0)),
+        )
+        .map_err(|error| error.to_string())?;
+
+    Ok(window)
 }
 
-fn bridge_script(webapp: &WebApp) -> Result<String, String> {
+fn user_scripts_json(app: &AppHandle, webapp: &WebApp) -> Result<String, String> {
+    let scripts = storage::read_user_scripts(app)?
+        .into_iter()
+        .filter(|script| script.enabled && script.web_app_id == webapp.id)
+        .map(|script| {
+            serde_json::json!({
+                "id": script.id,
+                "name": script.name,
+                "source": script.compiled_code
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or(script.code),
+                "runAt": script.run_at,
+                "matchPatterns": script.match_patterns,
+                "requiredPermissions": script.required_permissions,
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::to_string(&scripts).map_err(|error| error.to_string())
+}
+
+fn automations_json(app: &AppHandle, webapp: &WebApp) -> Result<String, String> {
+    let automations = storage::read_automations(app)?
+        .into_iter()
+        .filter(|automation| automation.enabled && automation.web_app_id == webapp.id)
+        .collect::<Vec<_>>();
+    serde_json::to_string(&automations).map_err(|error| error.to_string())
+}
+
+fn bridge_script_with_payloads(
+    webapp: &WebApp,
+    user_scripts_json: &str,
+    automations_json: &str,
+) -> Result<String, String> {
     let app_json = serde_json::to_string(&serde_json::json!({
         "id": webapp.id,
         "name": webapp.name,
@@ -114,6 +206,8 @@ fn bridge_script(webapp: &WebApp) -> Result<String, String> {
 (() => {{
   const app = {app_json};
   const permissions = {permissions_json};
+  const userScripts = {user_scripts_json};
+  const automations = {automations_json};
   const emitRoute = () => {{
     window.dispatchEvent(new CustomEvent('bandoo:route-change', {{
       detail: {{
@@ -123,6 +217,8 @@ fn bridge_script(webapp: &WebApp) -> Result<String, String> {
         hash: location.hash
       }}
     }}));
+    queueMicrotask(() => runUserScripts('url-change'));
+    queueMicrotask(() => runAutomations('url-change'));
   }};
 
   const notify = async (title, body) => {{
@@ -131,6 +227,166 @@ fn bridge_script(webapp: &WebApp) -> Result<String, String> {
     if (Notification.permission !== 'granted') return false;
     new Notification(String(title || app.name), {{ body: String(body || '') }});
     return true;
+  }};
+  const invoke = window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
+  const bridgeRequest = async (capability, operation, payload = {{}}) => {{
+    if (!invoke) throw new Error('Bandoo bridge IPC is not available');
+    return await invoke('bridge_request', {{
+      request: {{
+        webAppId: app.id,
+        capability,
+        operation,
+        payload
+      }}
+    }});
+  }};
+  const scriptMatches = (script) => {{
+    const patterns = script.matchPatterns?.length ? script.matchPatterns : ['*'];
+    return patterns.some((pattern) => {{
+      if (pattern === '*') return true;
+      if (pattern.startsWith('/') && pattern.endsWith('/')) {{
+        try {{ return new RegExp(pattern.slice(1, -1)).test(location.href); }} catch (_) {{ return false; }}
+      }}
+      return location.href.includes(pattern);
+    }});
+  }};
+  const scriptHasPermissions = (script) => {{
+    return (script.requiredPermissions || []).every((permission) => Boolean(permissions[permission]));
+  }};
+  const runUserScripts = async (runAt) => {{
+    for (const script of userScripts) {{
+      if (script.runAt !== runAt || !scriptMatches(script) || !scriptHasPermissions(script)) continue;
+      const startedAt = Date.now();
+      const runId = `script-${{script.id}}-${{startedAt}}`;
+      try {{
+        const runner = new Function(
+          'bandoo',
+          'app',
+          'page',
+          'clipboard',
+          'notification',
+          'workflow',
+          'shell',
+          'fs',
+          'network',
+          `"use strict"; return (async () => {{\n${{script.source || ''}}\n}})();`
+        );
+        await runner(
+          window.__BANDOO__,
+          window.__BANDOO__.app,
+          window.__BANDOO__.page,
+          window.__BANDOO__.clipboard,
+          window.__BANDOO__.notification,
+          window.__BANDOO__.workflow,
+          window.__BANDOO__.shell,
+          window.__BANDOO__.fs,
+          window.__BANDOO__.network
+        );
+        await workflowLog({{
+          id: runId,
+          sourceId: script.id,
+          kind: 'user-script',
+          status: 'completed',
+          message: `User script completed: ${{script.name || script.id}}`,
+          startedAt,
+          finishedAt: Date.now()
+        }});
+        console.info('[Bandoo user script]', {{ scriptId: script.id, runAt, ok: true }});
+      }} catch (error) {{
+        const message = error?.message || String(error);
+        await workflowLog({{
+          id: runId,
+          sourceId: script.id,
+          kind: 'user-script',
+          status: 'failed',
+          message,
+          startedAt,
+          finishedAt: Date.now(),
+          error: message
+        }});
+        console.error('[Bandoo user script]', {{ scriptId: script.id, runAt, error }});
+      }}
+    }}
+  }};
+  const conditionMatches = (condition) => {{
+    const value = condition.value || '';
+    let matched = true;
+    switch (condition.kind) {{
+      case 'url-contains':
+        matched = !value || location.href.includes(value);
+        break;
+      case 'url-regex':
+        try {{ matched = !value || new RegExp(value).test(location.href); }} catch (_) {{ matched = false; }}
+        break;
+      case 'current-webapp':
+        matched = !value || value === app.id;
+        break;
+      case 'element-exists':
+        matched = !value || Boolean(document.querySelector(value));
+        break;
+      case 'permission-enabled':
+        matched = !value || Boolean(permissions[value]);
+        break;
+      default:
+        matched = true;
+    }}
+    return condition.negate ? !matched : matched;
+  }};
+  const runAutomations = async (triggerKind) => {{
+    for (const automation of automations) {{
+      if (automation.trigger?.kind !== triggerKind) continue;
+      if (!(automation.conditions || []).every(conditionMatches)) continue;
+      const startedAt = Date.now();
+      const runId = `automation-${{automation.id}}-${{startedAt}}`;
+      try {{
+        const result = await window.__BANDOO__.automation.run(automation.actions || []);
+        await window.__BANDOO__.workflow.log({{
+          id: runId,
+          sourceId: automation.id,
+          kind: 'automation',
+          status: 'completed',
+          message: `Automation completed: ${{automation.name || automation.id}}`,
+          steps: result.steps || [],
+          startedAt,
+          finishedAt: Date.now()
+        }});
+        console.info('[Bandoo automation]', {{ automationId: automation.id, triggerKind, result }});
+      }} catch (error) {{
+        const message = error?.message || String(error);
+        await window.__BANDOO__?.workflow?.log?.({{
+          id: runId,
+          sourceId: automation.id,
+          kind: 'automation',
+          status: 'failed',
+          message,
+          steps: error?.steps || [],
+          startedAt,
+          finishedAt: Date.now(),
+          error: message
+        }});
+        console.error('[Bandoo automation]', {{ automationId: automation.id, triggerKind, error }});
+      }}
+    }}
+  }};
+  const workflowLog = async (...args) => {{
+    const payload =
+      args.length === 1 && args[0] && typeof args[0] === 'object' && !Array.isArray(args[0])
+        ? args[0]
+        : {{
+            sourceId: 'workflow.log',
+            kind: 'workflow',
+            status: 'completed',
+            message: args.map((item) => {{
+              if (typeof item === 'string') return item;
+              try {{ return JSON.stringify(item); }} catch (_) {{ return String(item); }}
+            }}).join(' ')
+          }};
+    try {{
+      return await bridgeRequest('workflow', 'log', payload);
+    }} catch (error) {{
+      console.warn('[Bandoo workflow log]', error);
+      return null;
+    }}
   }};
 
   Object.defineProperty(window, '__BANDOO__', {{
@@ -161,6 +417,20 @@ fn bridge_script(webapp: &WebApp) -> Result<String, String> {
           await navigator.clipboard.writeText(String(text ?? ''));
           return true;
         }}
+      }}),
+      shell: Object.freeze({{
+        exec: async (payload) => bridgeRequest('shell', 'exec', payload)
+      }}),
+      fs: Object.freeze({{
+        readText: async (path) => bridgeRequest('filesystem', 'readText', {{ path }}),
+        writeText: async (path, text) => bridgeRequest('filesystem', 'writeText', {{ path, text }}),
+        readDir: async (path) => bridgeRequest('filesystem', 'readDir', {{ path }}),
+        exists: async (path) => bridgeRequest('filesystem', 'exists', {{ path }}),
+        mkdir: async (path) => bridgeRequest('filesystem', 'mkdir', {{ path }}),
+        remove: async (path) => bridgeRequest('filesystem', 'remove', {{ path }})
+      }}),
+      network: Object.freeze({{
+        fetch: async (payload) => bridgeRequest('network', 'fetch', payload)
       }}),
       page: Object.freeze({{
         query: (selector) => {{
@@ -201,7 +471,12 @@ fn bridge_script(webapp: &WebApp) -> Result<String, String> {
       workflow: Object.freeze({{
         runActions: async (actions) => window.__BANDOO__.automation.run(actions),
         sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, Number(milliseconds || 0))),
-        log: (...args) => console.log('[Bandoo workflow]', ...args)
+        selectorCaptured: (selector) => bridgeRequest('workflow', 'selectorCaptured', {{ selector }}),
+        actionsRecorded: (actions) => bridgeRequest('workflow', 'actionsRecorded', {{ actions }}),
+        log: (...args) => {{
+          console.log('[Bandoo workflow]', ...args);
+          return workflowLog(...args);
+        }}
       }}),
       automation: Object.freeze({{
         run: async (actions) => {{
@@ -229,8 +504,24 @@ fn bridge_script(webapp: &WebApp) -> Result<String, String> {
                 case 'notify':
                   await window.__BANDOO__.notify(action.text || 'Bandoo WebForge', action.value || '');
                   break;
+                case 'wait':
+                case 'sleep':
+                  await window.__BANDOO__.workflow.sleep(action.timeoutMs ?? Number(action.value || 250));
+                  break;
                 case 'js':
                   Function(action.script || '')();
+                  break;
+                case 'shell':
+                  await window.__BANDOO__.shell.exec({{ command: action.value || action.text || '' }});
+                  break;
+                case 'fs-read':
+                  await window.__BANDOO__.fs.readText(action.value || action.text || '');
+                  break;
+                case 'fs-write':
+                  await window.__BANDOO__.fs.writeText(action.value || '', action.text || '');
+                  break;
+                case 'network-fetch':
+                  await window.__BANDOO__.network.fetch({{ url: action.value || action.text || '' }});
                   break;
                 default:
                   throw new Error(`Unsupported action kind: ${{action.kind}}`);
@@ -277,6 +568,46 @@ fn bridge_script(webapp: &WebApp) -> Result<String, String> {
   window.addEventListener('popstate', emitRoute);
   window.addEventListener('hashchange', emitRoute);
   queueMicrotask(emitRoute);
+  queueMicrotask(() => runUserScripts('page-load'));
+  queueMicrotask(() => runAutomations('page-load'));
+  for (const automation of automations) {{
+    if (automation.trigger?.kind === 'timer') {{
+      const interval = Number(automation.trigger?.url || automation.trigger?.shortcut || 60000);
+      setInterval(async () => {{
+        if (!(automation.conditions || []).every(conditionMatches)) return;
+        const startedAt = Date.now();
+        const runId = `automation-${{automation.id}}-${{startedAt}}`;
+        try {{
+          const result = await window.__BANDOO__.automation.run(automation.actions || []);
+          await window.__BANDOO__.workflow.log({{
+            id: runId,
+            sourceId: automation.id,
+            kind: 'automation',
+            status: 'completed',
+            message: `Automation completed: ${{automation.name || automation.id}}`,
+            steps: result.steps || [],
+            startedAt,
+            finishedAt: Date.now()
+          }});
+          console.info('[Bandoo automation]', {{ automationId: automation.id, triggerKind: 'timer', result }});
+        }} catch (error) {{
+          const message = error?.message || String(error);
+          await window.__BANDOO__?.workflow?.log?.({{
+            id: runId,
+            sourceId: automation.id,
+            kind: 'automation',
+            status: 'failed',
+            message,
+            steps: error?.steps || [],
+            startedAt,
+            finishedAt: Date.now(),
+            error: message
+          }});
+          console.error('[Bandoo automation]', {{ automationId: automation.id, triggerKind: 'timer', error }});
+        }}
+      }}, Math.max(interval, 1000));
+    }}
+  }}
 
   {user_script}
 }})();
@@ -313,30 +644,212 @@ pub fn launch_webapp(app: AppHandle, id: String) -> Result<(), String> {
         .ok_or_else(|| "WebApp not found".to_string())?;
 
     let label = window_label(&webapp.id);
-    if let Some(window) = app.get_webview_window(&label) {
+    if let Some(window) = app.get_window(&label) {
         window.set_focus().map_err(|error| error.to_string())?;
         return Ok(());
     }
 
-    let window = configured_builder(&app, label, &webapp)?
-        .build()
-        .map_err(|error| error.to_string())?;
+    let window = configured_shell_window(&app, label, &webapp)?;
     attach_window_state_tracking(app, webapp.id, &window);
 
     Ok(())
+}
+
+fn selector_capture_script() -> &'static str {
+    r#"
+(() => {
+  if (!window.__BANDOO__) return;
+  window.__BANDOO_SELECTOR_CAPTURE_CLEANUP__?.();
+  const escapeCss = (value) => window.CSS?.escape
+    ? window.CSS.escape(String(value))
+    : String(value).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+  const selectorFor = (target) => {
+    if (!(target instanceof Element)) return '';
+    if (target.id) return `#${escapeCss(target.id)}`;
+    const testId = target.getAttribute('data-testid') || target.getAttribute('data-test');
+    if (testId) return `[data-testid="${String(testId).replaceAll('"', '\\"')}"]`;
+    const aria = target.getAttribute('aria-label');
+    if (aria) return `${target.localName.toLowerCase()}[aria-label="${String(aria).replaceAll('"', '\\"')}"]`;
+    const path = [];
+    let element = target;
+    while (element && element.nodeType === 1 && element !== document.documentElement) {
+      let part = element.localName.toLowerCase();
+      const name = element.getAttribute('name');
+      if (name) {
+        part += `[name="${String(name).replaceAll('"', '\\"')}"]`;
+      } else {
+        const stableClass = [...element.classList].find((item) => !/^(active|selected|open|focus|hover|css-|sc-)/.test(item));
+        if (stableClass) part += `.${escapeCss(stableClass)}`;
+      }
+      const parent = element.parentElement;
+      if (parent) {
+        const same = [...parent.children].filter((item) => item.localName === element.localName);
+        if (same.length > 1) part += `:nth-of-type(${same.indexOf(element) + 1})`;
+      }
+      path.unshift(part);
+      const selector = path.join(' > ');
+      try {
+        if (document.querySelectorAll(selector).length === 1) return selector;
+      } catch (_) {}
+      element = parent;
+    }
+    return path.join(' > ');
+  };
+  const style = document.createElement('style');
+  style.textContent = '[data-bandoo-capture-hover="true"]{outline:2px solid #0f766e !important;outline-offset:2px !important;cursor:crosshair !important;}';
+  document.documentElement.append(style);
+  let current = null;
+  const cleanup = () => {
+    current?.removeAttribute('data-bandoo-capture-hover');
+    style.remove();
+    document.removeEventListener('mouseover', onMouseOver, true);
+    document.removeEventListener('click', onClick, true);
+    document.removeEventListener('keydown', onKeyDown, true);
+    delete window.__BANDOO_SELECTOR_CAPTURE_CLEANUP__;
+  };
+  const finish = (selector) => {
+    cleanup();
+    if (selector) {
+      window.__BANDOO__.workflow.selectorCaptured(selector);
+      navigator.clipboard?.writeText?.(selector).catch(() => {});
+    }
+  };
+  const onMouseOver = (event) => {
+    if (!(event.target instanceof Element)) return;
+    current?.removeAttribute('data-bandoo-capture-hover');
+    current = event.target;
+    current.setAttribute('data-bandoo-capture-hover', 'true');
+  };
+  const onClick = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    finish(selectorFor(event.target));
+  };
+  const onKeyDown = (event) => {
+    if (event.key === 'Escape') cleanup();
+  };
+  window.__BANDOO_SELECTOR_CAPTURE_CLEANUP__ = cleanup;
+  document.addEventListener('mouseover', onMouseOver, true);
+  document.addEventListener('click', onClick, true);
+  document.addEventListener('keydown', onKeyDown, true);
+})();
+"#
+}
+
+fn action_recording_script() -> &'static str {
+    r#"
+(() => {
+  if (!window.__BANDOO__) return;
+  window.__BANDOO_ACTION_RECORDING_CLEANUP__?.();
+  const actions = [];
+  const escapeCss = (value) => window.CSS?.escape
+    ? window.CSS.escape(String(value))
+    : String(value).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+  const selectorFor = (target) => {
+    if (!(target instanceof Element)) return '';
+    if (target.id) return `#${escapeCss(target.id)}`;
+    const testId = target.getAttribute('data-testid') || target.getAttribute('data-test');
+    if (testId) return `[data-testid="${String(testId).replaceAll('"', '\\"')}"]`;
+    const name = target.getAttribute('name');
+    if (name) return `${target.localName.toLowerCase()}[name="${String(name).replaceAll('"', '\\"')}"]`;
+    const path = [];
+    let element = target;
+    while (element && element.nodeType === 1 && element !== document.documentElement) {
+      let part = element.localName.toLowerCase();
+      const stableClass = [...element.classList].find((item) => !/^(active|selected|open|focus|hover|css-|sc-)/.test(item));
+      if (stableClass) part += `.${escapeCss(stableClass)}`;
+      const parent = element.parentElement;
+      if (parent) {
+        const same = [...parent.children].filter((item) => item.localName === element.localName);
+        if (same.length > 1) part += `:nth-of-type(${same.indexOf(element) + 1})`;
+      }
+      path.unshift(part);
+      const selector = path.join(' > ');
+      try {
+        if (document.querySelectorAll(selector).length === 1) return selector;
+      } catch (_) {}
+      element = parent;
+    }
+    return path.join(' > ');
+  };
+  const badge = document.createElement('div');
+  badge.textContent = 'Bandoo recording';
+  badge.style.cssText = 'position:fixed;z-index:2147483647;right:14px;bottom:14px;padding:8px 10px;border-radius:8px;background:#0f766e;color:#fff;font:12px system-ui,sans-serif;box-shadow:0 8px 24px rgba(15,23,42,.24);';
+  document.documentElement.append(badge);
+  const pushOrReplaceType = (selector, text) => {
+    const last = actions[actions.length - 1];
+    if (last?.kind === 'page-type' && last.selector === selector) {
+      last.text = text;
+    } else {
+      actions.push({ kind: 'page-type', selector, text });
+    }
+  };
+  const onClick = (event) => {
+    const selector = selectorFor(event.target);
+    if (selector) actions.push({ kind: 'page-click', selector });
+  };
+  const onInput = (event) => {
+    const selector = selectorFor(event.target);
+    if (!selector) return;
+    const target = event.target;
+    const text = 'value' in target ? target.value : target.textContent || '';
+    pushOrReplaceType(selector, String(text));
+  };
+  const stop = () => {
+    badge.remove();
+    document.removeEventListener('click', onClick, true);
+    document.removeEventListener('input', onInput, true);
+    document.removeEventListener('keydown', onKeyDown, true);
+    delete window.__BANDOO_ACTION_RECORDING_CLEANUP__;
+    window.__BANDOO__.workflow.actionsRecorded(actions);
+  };
+  const onKeyDown = (event) => {
+    if (event.key === 'Escape') stop();
+  };
+  window.__BANDOO_ACTION_RECORDING_CLEANUP__ = stop;
+  document.addEventListener('click', onClick, true);
+  document.addEventListener('input', onInput, true);
+  document.addEventListener('keydown', onKeyDown, true);
+  setTimeout(stop, 20000);
+})();
+"#
+}
+
+fn eval_content_script(app: AppHandle, web_app_id: String, script: &str) -> Result<(), String> {
+    launch_webapp(app.clone(), web_app_id.clone())?;
+    let label = content_label(&web_app_id);
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "WebApp content webview was not found after launch".to_string())?;
+    webview.eval(script).map_err(|error| error.to_string())
+}
+
+pub fn start_selector_capture(app: AppHandle, web_app_id: String) -> Result<(), String> {
+    eval_content_script(app, web_app_id, selector_capture_script())
+}
+
+pub fn start_action_recording(app: AppHandle, web_app_id: String) -> Result<(), String> {
+    eval_content_script(app, web_app_id, action_recording_script())
 }
 
 pub fn execute_automation(
     app: AppHandle,
     automation: AutomationConfig,
 ) -> Result<AutomationRunResult, String> {
+    let started_at = now_ms();
+    let run_id = format!("automation-{}-{started_at}", automation.id);
     if !automation.enabled {
         return Ok(AutomationRunResult {
+            run_id,
             automation_id: automation.id,
             web_app_id: automation.web_app_id,
             dispatched: false,
             message: "Automation is disabled".to_string(),
             steps: Vec::new(),
+            started_at,
+            finished_at: Some(now_ms()),
+            duration_ms: Some(0),
+            error: Some("Automation is disabled".to_string()),
         });
     }
 
@@ -352,11 +865,16 @@ pub fn execute_automation(
 
     if !conditions_match(&automation, &webapp) {
         return Ok(AutomationRunResult {
+            run_id,
             automation_id: automation.id,
             web_app_id: webapp_id,
             dispatched: false,
             message: "Automation conditions were not met".to_string(),
             steps: Vec::new(),
+            started_at,
+            finished_at: Some(now_ms()),
+            duration_ms: Some(now_ms().saturating_sub(started_at)),
+            error: Some("Automation conditions were not met".to_string()),
         });
     }
 
@@ -367,48 +885,114 @@ pub fn execute_automation(
         .find(|step| step.status == "failed")
         .cloned()
     {
+        let message = failed.message.clone();
         return Ok(AutomationRunResult {
+            run_id,
             automation_id: automation.id,
             web_app_id: webapp_id,
             dispatched: false,
-            message: failed.message,
+            message: message.clone(),
             steps: preflight_steps,
+            started_at,
+            finished_at: Some(now_ms()),
+            duration_ms: Some(now_ms().saturating_sub(started_at)),
+            error: Some(message),
         });
     }
 
     launch_webapp(app.clone(), webapp_id.clone())?;
-    let label = window_label(&webapp_id);
-    let window = app
-        .get_webview_window(&label)
-        .ok_or_else(|| "WebApp window was not found after launch".to_string())?;
+    let label = content_label(&webapp_id);
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "WebApp content webview was not found after launch".to_string())?;
 
     let actions_json = serde_json::to_string(&actions).map_err(|error| error.to_string())?;
+    let run_id_json = serde_json::to_string(&run_id).map_err(|error| error.to_string())?;
+    let automation_id_json =
+        serde_json::to_string(&automation.id).map_err(|error| error.to_string())?;
     let script = format!(
         r#"
 (async () => {{
+  const runId = {run_id_json};
+  const sourceId = {automation_id_json};
+  const startedAt = Date.now();
   if (!window.__BANDOO__?.automation?.run) throw new Error('Bandoo automation bridge is not available');
-  const result = await window.__BANDOO__.automation.run({actions_json});
-  console.info('[Bandoo automation]', result);
+  try {{
+    const result = await window.__BANDOO__.automation.run({actions_json});
+    const finishedAt = Date.now();
+    await window.__BANDOO__?.workflow?.log?.({{
+      id: runId,
+      sourceId,
+      kind: 'automation',
+      status: 'completed',
+      message: 'Automation completed',
+      steps: result.steps || [],
+      startedAt,
+      finishedAt,
+      durationMs: finishedAt - startedAt
+    }});
+    console.info('[Bandoo automation]', result);
+  }} catch (error) {{
+    const finishedAt = Date.now();
+    const message = error?.message || String(error);
+    await window.__BANDOO__?.workflow?.log?.({{
+      id: runId,
+      sourceId,
+      kind: 'automation',
+      status: 'failed',
+      message,
+      steps: error?.steps || [],
+      startedAt,
+      finishedAt,
+      durationMs: finishedAt - startedAt,
+      error: message
+    }});
+    throw error;
+  }}
 }})().catch((error) => {{
   console.error('[Bandoo automation]', error);
   if (error.steps) console.table(error.steps);
 }});
 "#
     );
-    window.eval(script).map_err(|error| error.to_string())?;
+    webview.eval(script).map_err(|error| error.to_string())?;
+
+    let dispatched_steps = preflight_steps
+        .into_iter()
+        .map(|step| AutomationStepResult {
+            status: "dispatched".to_string(),
+            ..step
+        })
+        .collect::<Vec<_>>();
+    let message = "Automation was dispatched to the WebApp window".to_string();
+    let _ = storage::append_run_log(
+        &app,
+        AutomationRunLog {
+            id: run_id.clone(),
+            source_id: automation.id.clone(),
+            web_app_id: webapp_id.clone(),
+            kind: "automation".to_string(),
+            status: "dispatched".to_string(),
+            message: message.clone(),
+            steps: dispatched_steps.clone(),
+            started_at,
+            finished_at: None,
+            duration_ms: None,
+            error: None,
+        },
+    );
 
     Ok(AutomationRunResult {
+        run_id,
         automation_id: automation.id,
         web_app_id: webapp_id,
         dispatched: true,
-        message: "Automation was dispatched to the WebApp window".to_string(),
-        steps: preflight_steps
-            .into_iter()
-            .map(|step| AutomationStepResult {
-                status: "dispatched".to_string(),
-                ..step
-            })
-            .collect(),
+        message,
+        steps: dispatched_steps,
+        started_at,
+        finished_at: None,
+        duration_ms: None,
+        error: None,
     })
 }
 
@@ -416,12 +1000,19 @@ pub fn execute_user_script(
     app: AppHandle,
     script: UserScriptConfig,
 ) -> Result<UserScriptRunResult, String> {
+    let started_at = now_ms();
+    let run_id = format!("script-{}-{started_at}", script.id);
     if !script.enabled {
         return Ok(UserScriptRunResult {
+            run_id,
             script_id: script.id,
             web_app_id: script.web_app_id,
             dispatched: false,
             message: "User script is disabled".to_string(),
+            started_at,
+            finished_at: Some(now_ms()),
+            duration_ms: Some(0),
+            error: Some("User script is disabled".to_string()),
         });
     }
 
@@ -439,29 +1030,42 @@ pub fn execute_user_script(
         missing_permission_message(&script.required_permissions, &webapp.permissions)
     {
         return Ok(UserScriptRunResult {
+            run_id,
             script_id: script.id,
             web_app_id: webapp_id,
             dispatched: false,
-            message,
+            message: message.clone(),
+            started_at,
+            finished_at: Some(now_ms()),
+            duration_ms: Some(now_ms().saturating_sub(started_at)),
+            error: Some(message),
         });
     }
 
     launch_webapp(app.clone(), webapp_id.clone())?;
-    let label = window_label(&webapp_id);
-    let window = app
-        .get_webview_window(&label)
-        .ok_or_else(|| "WebApp window was not found after launch".to_string())?;
+    let label = content_label(&webapp_id);
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "WebApp content webview was not found after launch".to_string())?;
 
     let script_id_json = serde_json::to_string(&script.id).map_err(|error| error.to_string())?;
     let script_name_json =
         serde_json::to_string(&script.name).map_err(|error| error.to_string())?;
-    let code_json = serde_json::to_string(&script.code).map_err(|error| error.to_string())?;
+    let run_id_json = serde_json::to_string(&run_id).map_err(|error| error.to_string())?;
+    let source = script
+        .compiled_code
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(&script.code);
+    let code_json = serde_json::to_string(source).map_err(|error| error.to_string())?;
     let eval_script = format!(
         r#"
 (async () => {{
+  const runId = {run_id_json};
   const scriptId = {script_id_json};
   const scriptName = {script_name_json};
   const source = {code_json};
+  const startedAt = Date.now();
   const bandoo = window.__BANDOO__;
   if (!bandoo) throw new Error('Bandoo bridge is not available');
 
@@ -473,6 +1077,9 @@ pub fn execute_user_script(
       'clipboard',
       'notification',
       'workflow',
+      'shell',
+      'fs',
+      'network',
       `"use strict"; return (async () => {{\n${{source}}\n}})();`
     );
     await runner(
@@ -481,11 +1088,37 @@ pub fn execute_user_script(
       bandoo.page,
       bandoo.clipboard,
       bandoo.notification,
-      bandoo.workflow
+      bandoo.workflow,
+      bandoo.shell,
+      bandoo.fs,
+      bandoo.network
     );
+    const finishedAt = Date.now();
+    await bandoo.workflow?.log?.({{
+      id: runId,
+      sourceId: scriptId,
+      kind: 'user-script',
+      status: 'completed',
+      message: `User script completed: ${{scriptName}}`,
+      startedAt,
+      finishedAt,
+      durationMs: finishedAt - startedAt
+    }});
     console.info('[Bandoo user script]', {{ scriptId, scriptName, ok: true }});
   }} catch (error) {{
+    const finishedAt = Date.now();
     const message = error?.message || String(error);
+    await bandoo.workflow?.log?.({{
+      id: runId,
+      sourceId: scriptId,
+      kind: 'user-script',
+      status: 'failed',
+      message,
+      startedAt,
+      finishedAt,
+      durationMs: finishedAt - startedAt,
+      error: message
+    }});
     console.error('[Bandoo user script]', {{ scriptId, scriptName, message, error }});
     await bandoo.notification?.send?.('Bandoo 用户脚本失败', message).catch(() => false);
   }}
@@ -494,15 +1127,38 @@ pub fn execute_user_script(
 }});
 "#
     );
-    window
+    webview
         .eval(eval_script)
         .map_err(|error| error.to_string())?;
 
+    let message = "User script was dispatched to the WebApp window".to_string();
+    let _ = storage::append_run_log(
+        &app,
+        AutomationRunLog {
+            id: run_id.clone(),
+            source_id: script.id.clone(),
+            web_app_id: webapp_id.clone(),
+            kind: "user-script".to_string(),
+            status: "dispatched".to_string(),
+            message: message.clone(),
+            steps: Vec::new(),
+            started_at,
+            finished_at: None,
+            duration_ms: None,
+            error: None,
+        },
+    );
+
     Ok(UserScriptRunResult {
+        run_id,
         script_id: script.id,
         web_app_id: webapp_id,
         dispatched: true,
-        message: "User script was dispatched to the WebApp window".to_string(),
+        message,
+        started_at,
+        finished_at: None,
+        duration_ms: None,
+        error: None,
     })
 }
 
@@ -562,6 +1218,11 @@ fn preflight_action(
             Some("Page permission is disabled")
         }
         "notify" if !permissions.notification => Some("Notification permission is disabled"),
+        "shell" if !permissions.shell => Some("Shell permission is disabled"),
+        "fs-read" | "fs-write" if !permissions.filesystem => {
+            Some("Filesystem permission is disabled")
+        }
+        "network-fetch" if !permissions.network => Some("Network permission is disabled"),
         "page-focus" | "page-click"
             if action.selector.as_deref().unwrap_or("").trim().is_empty() =>
         {
@@ -586,6 +1247,7 @@ fn preflight_action(
             action_kind,
             status: "failed".to_string(),
             message: format!("Step {index} failed ({}): {message}", action.kind),
+            duration_ms: None,
         };
     }
 
@@ -594,6 +1256,7 @@ fn preflight_action(
         action_kind,
         status: "ready".to_string(),
         message: "Ready".to_string(),
+        duration_ms: None,
     }
 }
 
@@ -607,6 +1270,12 @@ fn is_supported_action(kind: &str) -> bool {
             | "page-type"
             | "notify"
             | "js"
+            | "wait"
+            | "sleep"
+            | "shell"
+            | "fs-read"
+            | "fs-write"
+            | "network-fetch"
     )
 }
 
@@ -620,8 +1289,8 @@ fn missing_permission_message(
             "clipboard" => permissions.clipboard,
             "notification" => permissions.notification,
             "network" => permissions.network,
-            "shell" => false,
-            "filesystem" => false,
+            "shell" => permissions.shell,
+            "filesystem" => permissions.filesystem,
             unknown => {
                 return Some(format!("Unsupported user script permission: {unknown}"));
             }
@@ -633,4 +1302,47 @@ fn missing_permission_message(
             Some(format!("Missing WebApp permission: {permission}"))
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_url_accepts_http_and_https() {
+        assert!(validate_url("https://chatgpt.com").is_ok());
+        assert!(validate_url("http://localhost:5173").is_ok());
+    }
+
+    #[test]
+    fn validate_url_rejects_unsafe_schemes() {
+        assert!(validate_url("file:///etc/passwd").is_err());
+        assert!(validate_url("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn preflight_rejects_disabled_high_risk_permissions() {
+        let permissions = WebAppPermissions {
+            page: true,
+            clipboard: false,
+            shell: false,
+            filesystem: false,
+            network: false,
+            notification: false,
+        };
+        let step = preflight_action(
+            1,
+            &AutomationAction {
+                kind: "shell".to_string(),
+                selector: None,
+                text: None,
+                script: None,
+                value: Some("echo hi".to_string()),
+                timeout_ms: None,
+                continue_on_error: None,
+            },
+            &permissions,
+        );
+        assert_eq!(step.status, "failed");
+    }
 }

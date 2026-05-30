@@ -2,6 +2,9 @@ export interface WebAppWindowConfig {
   width: number
   height: number
   maximized?: boolean
+  transparent: boolean
+  decorations: boolean
+  stableFallback: boolean
 }
 
 export interface WebAppWindowState {
@@ -27,6 +30,35 @@ export interface WebAppScriptConfig {
   customScript: string
 }
 
+export interface WebAppChromeConfig {
+  enabled: boolean
+  titlebarHeight: number
+  backgroundColor: string
+  foregroundColor: string
+  opacity: number
+  cornerRadius: number
+  shadow: boolean
+  controlsPosition: 'left' | 'right'
+  controlsStyle: 'windows' | 'traffic-light' | 'minimal'
+  showTitle: boolean
+  showIcon: boolean
+  showUrl: boolean
+  themePresetId?: string
+}
+
+export interface ThemePreset {
+  id: string
+  name: string
+  chromeConfig: WebAppChromeConfig
+  createdAt: number
+  updatedAt?: number
+}
+
+export interface AppSettings {
+  defaultThemePresetId?: string
+  defaultChromeConfig: WebAppChromeConfig
+}
+
 export interface WebApp {
   id: string
   name: string
@@ -39,6 +71,7 @@ export interface WebApp {
   lastWindowState?: WebAppWindowState
   permissions: WebAppPermissions
   scriptConfig: WebAppScriptConfig
+  chromeConfig: WebAppChromeConfig
   createdAt: number
   updatedAt?: number
 }

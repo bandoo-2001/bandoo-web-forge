@@ -25,6 +25,20 @@ declare global {
         readText: () => Promise<string>
         writeText: (text: string) => Promise<boolean>
       }
+      shell: {
+        exec: (payload: { command: string; cwd?: string; env?: Record<string, string>; timeoutMs?: number }) => Promise<unknown>
+      }
+      fs: {
+        readText: (path: string) => Promise<unknown>
+        writeText: (path: string, text: string) => Promise<unknown>
+        readDir: (path: string) => Promise<unknown>
+        exists: (path: string) => Promise<unknown>
+        mkdir: (path: string) => Promise<unknown>
+        remove: (path: string) => Promise<unknown>
+      }
+      network: {
+        fetch: (payload: { url: string; method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number }) => Promise<unknown>
+      }
       page: {
         query: (selector: string) => Element | null
         focus: (selector: string) => boolean

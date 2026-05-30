@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
+import ts from 'typescript'
 import type { UserScriptConfig, UserScriptDraft, UserScriptRunResult } from '@/types/scripts'
 
 const STORAGE_KEY = 'bandoo-webforge.user-scripts'
@@ -21,26 +22,50 @@ function writeLocal(items: UserScriptConfig[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(items))
 }
 
+function normalizeScript(item: UserScriptConfig): UserScriptConfig {
+  const language = item.language ?? 'javascript'
+  const compiledCode =
+    language === 'typescript'
+      ? ts.transpileModule(item.code, {
+          compilerOptions: {
+            target: ts.ScriptTarget.ES2020,
+            module: ts.ModuleKind.ESNext,
+          },
+        }).outputText
+      : item.compiledCode
+
+  return {
+    ...item,
+    language,
+    compiledCode,
+    runAt: item.runAt ?? 'manual',
+    matchPatterns: item.matchPatterns ?? [],
+    requiredPermissions: item.requiredPermissions ?? [],
+  }
+}
+
 export const useScriptStore = defineStore('scripts', {
   state: () => ({
     items: [] as UserScriptConfig[],
   }),
   actions: {
     async load() {
-      this.items = isTauriRuntime()
+      const items = isTauriRuntime()
         ? await invoke<UserScriptConfig[]>('list_user_scripts')
         : readLocal()
+      this.items = items.map(normalizeScript)
     },
     async save(item: UserScriptConfig) {
+      const normalized = normalizeScript(item)
       if (isTauriRuntime()) {
-        this.items = await invoke<UserScriptConfig[]>('upsert_user_script', { script: item })
+        this.items = (await invoke<UserScriptConfig[]>('upsert_user_script', { script: normalized })).map(normalizeScript)
       } else {
-        this.items = [item, ...this.items.filter((candidate) => candidate.id !== item.id)]
+        this.items = [normalized, ...this.items.filter((candidate) => candidate.id !== normalized.id)]
         writeLocal(this.items)
       }
     },
     async create(draft: UserScriptDraft) {
-      await this.save({ ...draft, id: createId(), createdAt: Date.now() })
+      await this.save(normalizeScript({ ...draft, id: createId(), createdAt: Date.now() }))
     },
     async remove(id: string) {
       if (isTauriRuntime()) {

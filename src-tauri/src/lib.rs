@@ -1,4 +1,5 @@
 mod automation;
+mod bridge;
 mod models;
 mod platform;
 mod runtime;
@@ -11,8 +12,9 @@ use tauri::{
 };
 
 use crate::models::{
-    AutomationConfig, AutomationRunResult, DesktopIntegrationResult, DesktopIntegrationStatus,
-    PromptTemplate, RuntimeInfo, UserScriptConfig, UserScriptRunResult, WebApp,
+    AppSettings, AutomationConfig, AutomationRunLog, AutomationRunResult, BridgeRequest,
+    BridgeResponse, DesktopIntegrationResult, DesktopIntegrationStatus, PromptTemplate,
+    RuntimeInfo, ThemePreset, UserScriptConfig, UserScriptRunResult, WebApp,
 };
 
 #[tauri::command]
@@ -32,7 +34,9 @@ fn upsert_webapp(app: AppHandle, webapp: WebApp) -> Result<Vec<WebApp>, String> 
 
 #[tauri::command]
 fn delete_webapp(app: AppHandle, id: String) -> Result<Vec<WebApp>, String> {
-    storage::delete_webapp(&app, &id)
+    let items = storage::delete_webapp(&app, &id)?;
+    let _ = platform::remove_all_desktop_entries(&id);
+    Ok(items)
 }
 
 #[tauri::command]
@@ -61,8 +65,18 @@ fn desktop_integration_statuses(id: String) -> Result<Vec<DesktopIntegrationStat
 }
 
 #[tauri::command]
-fn launch_webapp(app: AppHandle, id: String) -> Result<(), String> {
+async fn launch_webapp(app: AppHandle, id: String) -> Result<(), String> {
     runtime::launch_webapp(app, id)
+}
+
+#[tauri::command]
+fn start_selector_capture(app: AppHandle, web_app_id: String) -> Result<(), String> {
+    runtime::start_selector_capture(app, web_app_id)
+}
+
+#[tauri::command]
+fn start_action_recording(app: AppHandle, web_app_id: String) -> Result<(), String> {
+    runtime::start_action_recording(app, web_app_id)
 }
 
 #[tauri::command]
@@ -92,7 +106,7 @@ fn delete_automation(app: AppHandle, id: String) -> Result<Vec<AutomationConfig>
 }
 
 #[tauri::command]
-fn execute_automation(
+async fn execute_automation(
     app: AppHandle,
     automation: AutomationConfig,
 ) -> Result<AutomationRunResult, String> {
@@ -118,7 +132,7 @@ fn delete_user_script(app: AppHandle, id: String) -> Result<Vec<UserScriptConfig
 }
 
 #[tauri::command]
-fn execute_user_script(
+async fn execute_user_script(
     app: AppHandle,
     script: UserScriptConfig,
 ) -> Result<UserScriptRunResult, String> {
@@ -141,6 +155,41 @@ fn upsert_prompt_template(
 #[tauri::command]
 fn delete_prompt_template(app: AppHandle, id: String) -> Result<Vec<PromptTemplate>, String> {
     storage::delete_prompt_template(&app, &id)
+}
+
+#[tauri::command]
+fn list_theme_presets(app: AppHandle) -> Result<Vec<ThemePreset>, String> {
+    storage::read_theme_presets(&app)
+}
+
+#[tauri::command]
+fn upsert_theme_preset(app: AppHandle, preset: ThemePreset) -> Result<Vec<ThemePreset>, String> {
+    storage::upsert_theme_preset(&app, preset)
+}
+
+#[tauri::command]
+fn delete_theme_preset(app: AppHandle, id: String) -> Result<Vec<ThemePreset>, String> {
+    storage::delete_theme_preset(&app, &id)
+}
+
+#[tauri::command]
+fn app_settings(app: AppHandle) -> Result<AppSettings, String> {
+    storage::read_app_settings(&app)
+}
+
+#[tauri::command]
+fn save_app_settings(app: AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
+    storage::write_app_settings(&app, &settings)
+}
+
+#[tauri::command]
+fn list_run_logs(app: AppHandle) -> Result<Vec<AutomationRunLog>, String> {
+    storage::read_run_logs(&app)
+}
+
+#[tauri::command]
+fn bridge_request(app: AppHandle, request: BridgeRequest) -> Result<BridgeResponse, String> {
+    bridge::handle(app, request)
 }
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
@@ -190,6 +239,8 @@ pub fn run() {
             remove_desktop_entry,
             desktop_integration_statuses,
             launch_webapp,
+            start_selector_capture,
+            start_action_recording,
             list_automations,
             upsert_automation,
             delete_automation,
@@ -200,7 +251,14 @@ pub fn run() {
             execute_user_script,
             list_prompt_templates,
             upsert_prompt_template,
-            delete_prompt_template
+            delete_prompt_template,
+            list_theme_presets,
+            upsert_theme_preset,
+            delete_theme_preset,
+            app_settings,
+            save_app_settings,
+            list_run_logs,
+            bridge_request
         ])
         .run(tauri::generate_context!())
         .expect("error while running Bandoo WebForge");

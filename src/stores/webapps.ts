@@ -1,11 +1,15 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import type {
+  AppSettings,
   DesktopIntegrationResult,
   DesktopIntegrationStatus,
   DesktopIntegrationTarget,
+  ThemePreset,
   WebApp,
+  WebAppChromeConfig,
   WebAppDraft,
+  WebAppWindowConfig,
 } from '@/types/webapp'
 
 const STORAGE_KEY = 'bandoo-webforge.webapps'
@@ -27,9 +31,83 @@ function writeLocalWebApps(items: WebApp[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(items))
 }
 
+export function defaultChromeConfig(): WebAppChromeConfig {
+  return {
+    enabled: true,
+    titlebarHeight: 44,
+    backgroundColor: '#111827',
+    foregroundColor: '#f8fafc',
+    opacity: 1,
+    cornerRadius: 12,
+    shadow: true,
+    controlsPosition: 'right',
+    controlsStyle: 'windows',
+    showTitle: true,
+    showIcon: true,
+    showUrl: false,
+    themePresetId: 'bandoo-default',
+  }
+}
+
+export function defaultWindowConfig(): WebAppWindowConfig {
+  return {
+    width: 1280,
+    height: 860,
+    maximized: false,
+    transparent: true,
+    decorations: false,
+    stableFallback: true,
+  }
+}
+
+export function defaultAppSettings(): AppSettings {
+  return {
+    defaultThemePresetId: 'bandoo-default',
+    defaultChromeConfig: defaultChromeConfig(),
+  }
+}
+
+export function builtInThemePresets(): ThemePreset[] {
+  return [
+    {
+      id: 'bandoo-default',
+      name: 'Bandoo Dark',
+      chromeConfig: defaultChromeConfig(),
+      createdAt: 0,
+    },
+    {
+      id: 'graphite-light',
+      name: 'Graphite Light',
+      chromeConfig: {
+        ...defaultChromeConfig(),
+        backgroundColor: '#f8fafc',
+        foregroundColor: '#18202a',
+        controlsStyle: 'minimal',
+      },
+      createdAt: 0,
+    },
+    {
+      id: 'teal-focus',
+      name: 'Teal Focus',
+      chromeConfig: {
+        ...defaultChromeConfig(),
+        backgroundColor: '#0f766e',
+        foregroundColor: '#f8fafc',
+        controlsPosition: 'left',
+        cornerRadius: 16,
+      },
+      createdAt: 0,
+    },
+  ]
+}
+
 function normalizeWebApp(item: WebApp): WebApp {
   return {
     ...item,
+    windowConfig: {
+      ...defaultWindowConfig(),
+      ...item.windowConfig,
+    },
     permissions: {
       page: item.permissions.page ?? true,
       clipboard: item.permissions.clipboard ?? false,
@@ -42,6 +120,10 @@ function normalizeWebApp(item: WebApp): WebApp {
       injectBridge: true,
       customScriptEnabled: false,
       customScript: '',
+    },
+    chromeConfig: {
+      ...defaultChromeConfig(),
+      ...(item.chromeConfig ?? {}),
     },
   }
 }

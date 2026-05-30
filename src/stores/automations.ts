@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
-import type { AutomationConfig, AutomationDraft, AutomationRunResult } from '@/types/automation'
+import type { AutomationConfig, AutomationDraft, AutomationRunLog, AutomationRunResult } from '@/types/automation'
 
 const STORAGE_KEY = 'bandoo-webforge.automations'
 
@@ -24,6 +24,7 @@ function writeLocal(items: AutomationConfig[]) {
 export const useAutomationStore = defineStore('automations', {
   state: () => ({
     items: [] as AutomationConfig[],
+    logs: [] as AutomationRunLog[],
     loading: false,
   }),
   actions: {
@@ -65,6 +66,25 @@ export const useAutomationStore = defineStore('automations', {
         throw new Error('Automation execution is only available in the Tauri runtime')
       }
       return await invoke<AutomationRunResult>('execute_automation', { automation })
+    },
+    async startSelectorCapture(webAppId: string) {
+      if (!isTauriRuntime()) {
+        throw new Error('Selector capture is only available in the Tauri runtime')
+      }
+      await invoke('start_selector_capture', { webAppId })
+    },
+    async startActionRecording(webAppId: string) {
+      if (!isTauriRuntime()) {
+        throw new Error('Recording is only available in the Tauri runtime')
+      }
+      await invoke('start_action_recording', { webAppId })
+    },
+    async loadLogs() {
+      if (!isTauriRuntime()) {
+        this.logs = []
+        return
+      }
+      this.logs = await invoke<AutomationRunLog[]>('list_run_logs')
     },
   },
 })

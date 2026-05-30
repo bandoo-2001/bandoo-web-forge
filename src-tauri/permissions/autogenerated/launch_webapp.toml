@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-launch-webapp"
+description = "Enables the launch_webapp command without any pre-configured scope."
+commands.allow = ["launch_webapp"]
+
+[[permission]]
+identifier = "deny-launch-webapp"
+description = "Denies the launch_webapp command without any pre-configured scope."
+commands.deny = ["launch_webapp"]

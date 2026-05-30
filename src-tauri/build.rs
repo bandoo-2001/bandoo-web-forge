@@ -1,3 +1,35 @@
 fn main() {
-    tauri_build::build()
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
+            "runtime_info",
+            "list_webapps",
+            "upsert_webapp",
+            "delete_webapp",
+            "install_desktop_entry",
+            "remove_desktop_entry",
+            "desktop_integration_statuses",
+            "launch_webapp",
+            "start_selector_capture",
+            "start_action_recording",
+            "list_automations",
+            "upsert_automation",
+            "delete_automation",
+            "execute_automation",
+            "list_user_scripts",
+            "upsert_user_script",
+            "delete_user_script",
+            "execute_user_script",
+            "list_prompt_templates",
+            "upsert_prompt_template",
+            "delete_prompt_template",
+            "list_theme_presets",
+            "upsert_theme_preset",
+            "delete_theme_preset",
+            "app_settings",
+            "save_app_settings",
+            "list_run_logs",
+            "bridge_request",
+        ]),
+    ))
+    .expect("failed to build Tauri app manifest")
 }

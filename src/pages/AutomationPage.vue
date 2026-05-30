@@ -1,16 +1,21 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { storeToRefs } from 'pinia'
+import { listen } from '@tauri-apps/api/event'
 import { useAutomationStore } from '@/stores/automations'
-import type { AutomationDraft, AutomationRunResult } from '@/types/automation'
+import type { AutomationAction, AutomationDraft, AutomationRunResult } from '@/types/automation'
 
 const store = useAutomationStore()
-const { items, loading } = storeToRefs(store)
+const { items, loading, logs } = storeToRefs(store)
 const message = reactive({
   type: '',
   text: '',
 })
 const lastResult = ref<AutomationRunResult | null>(null)
+const captureTargetIndex = ref<number | null>(null)
+const recording = ref(false)
+let unlistenSelector: (() => void) | null = null
+let unlistenActions: (() => void) | null = null
 const enabledShortcuts = computed(() =>
   items.value
     .filter((item) => item.enabled && item.trigger.kind === 'shortcut' && item.trigger.shortcut)
@@ -39,8 +44,72 @@ const draft = reactive<AutomationDraft>({
   ],
 })
 
+const actionOptions = [
+  ['clipboard-read', '读取剪贴板'],
+  ['clipboard-write', '写入剪贴板'],
+  ['page-focus', '聚焦元素'],
+  ['page-click', '点击元素'],
+  ['page-type', '输入文本'],
+  ['wait', '等待'],
+  ['js', '执行 JS'],
+  ['notify', '通知'],
+  ['shell', 'Shell'],
+  ['fs-read', '读取文件'],
+  ['fs-write', '写入文件'],
+  ['network-fetch', '网络请求'],
+] as const
+
+function addAction(kind = 'wait') {
+  draft.actions.push({
+    kind,
+    timeoutMs: kind === 'wait' ? 500 : undefined,
+  })
+}
+
+function removeAction(index: number) {
+  draft.actions.splice(index, 1)
+}
+
+function isTauriRuntime() {
+  return Boolean('__TAURI_INTERNALS__' in window)
+}
+
+async function captureSelector(index: number) {
+  try {
+    if (!draft.webAppId.trim()) {
+      throw new Error('请先填写绑定 WebApp ID')
+    }
+    captureTargetIndex.value = index
+    await store.startSelectorCapture(draft.webAppId.trim())
+    message.type = 'success'
+    message.text = '已进入元素选择模式'
+  } catch (error) {
+    captureTargetIndex.value = null
+    message.type = 'error'
+    message.text = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function startRecording() {
+  try {
+    if (!draft.webAppId.trim()) {
+      throw new Error('请先填写绑定 WebApp ID')
+    }
+    recording.value = true
+    await store.startActionRecording(draft.webAppId.trim())
+    message.type = 'success'
+    message.text = '录制已开始，20 秒后自动回填'
+  } catch (error) {
+    recording.value = false
+    message.type = 'error'
+    message.text = error instanceof Error ? error.message : String(error)
+  }
+}
+
 async function submit() {
-  draft.actions[2].selector = draft.actions[1].selector
+  if (draft.actions[1]?.selector && draft.actions[2]) {
+    draft.actions[2].selector = draft.actions[1].selector
+  }
   await store.create({
     ...draft,
     trigger: { ...draft.trigger },
@@ -57,6 +126,7 @@ async function execute(id: string) {
     lastResult.value = result
     message.type = result.dispatched ? 'success' : 'error'
     message.text = result.message
+    await store.loadLogs()
   } catch (error) {
     lastResult.value = null
     message.type = 'error'
@@ -65,7 +135,37 @@ async function execute(id: string) {
 }
 
 onMounted(() => {
-  void store.load()
+  void Promise.all([store.load(), store.loadLogs()])
+  if (isTauriRuntime()) {
+    void listen<{ webAppId: string; selector: string }>('bandoo-selector-captured', (event) => {
+      if (event.payload.webAppId !== draft.webAppId.trim()) return
+      const index = captureTargetIndex.value
+      if (index === null || !draft.actions[index]) return
+      draft.actions[index].selector = event.payload.selector
+      captureTargetIndex.value = null
+      message.type = 'success'
+      message.text = `已采集选择器：${event.payload.selector}`
+      void store.loadLogs()
+    }).then((unlisten) => {
+      unlistenSelector = unlisten
+    })
+    void listen<{ webAppId: string; actions: AutomationAction[] }>('bandoo-actions-recorded', (event) => {
+      if (event.payload.webAppId !== draft.webAppId.trim()) return
+      const actions = event.payload.actions ?? []
+      draft.actions.push(...actions.map((action) => ({ ...action })))
+      recording.value = false
+      message.type = 'success'
+      message.text = `已回填 ${actions.length} 个录制步骤`
+      void store.loadLogs()
+    }).then((unlisten) => {
+      unlistenActions = unlisten
+    })
+  }
+})
+
+onUnmounted(() => {
+  unlistenSelector?.()
+  unlistenActions?.()
 })
 </script>
 
@@ -115,6 +215,59 @@ onMounted(() => {
         <span>输入模板</span>
         <textarea v-model="draft.actions[2].text" rows="4" />
       </label>
+      <div class="step-editor">
+        <div class="panel-title">
+          <h2>步骤编排</h2>
+          <div class="app-actions">
+            <button type="button" @click="startRecording">
+              {{ recording ? '录制中' : '录制' }}
+            </button>
+            <button type="button" @click="addAction()">添加步骤</button>
+          </div>
+        </div>
+        <article v-for="(action, index) in draft.actions" :key="index" class="step-card">
+          <div class="field-row">
+            <label>
+              <span>动作</span>
+              <select v-model="action.kind">
+                <option v-for="[value, label] in actionOptions" :key="value" :value="value">
+                  {{ label }}
+                </option>
+              </select>
+            </label>
+            <label>
+              <span>超时 ms</span>
+              <input v-model.number="action.timeoutMs" type="number" min="0" />
+            </label>
+          </div>
+          <label>
+            <span>Selector</span>
+            <input v-model="action.selector" placeholder="textarea, button, [data-testid]" />
+          </label>
+          <label>
+            <span>文本</span>
+            <textarea v-model="action.text" rows="2" />
+          </label>
+          <label>
+            <span>值 / 路径 / URL</span>
+            <input v-model="action.value" />
+          </label>
+          <label>
+            <span>JS</span>
+            <textarea v-model="action.script" rows="3" spellcheck="false" />
+          </label>
+          <div class="app-actions">
+            <label class="inline-toggle">
+              <input v-model="action.continueOnError" type="checkbox" />
+              失败后继续
+            </label>
+            <button type="button" class="danger" @click="removeAction(index)">删除步骤</button>
+            <button type="button" @click="captureSelector(index)">
+              {{ captureTargetIndex === index ? '采集中' : '采集 Selector' }}
+            </button>
+          </div>
+        </article>
+      </div>
       <label class="inline-toggle"><input v-model="draft.enabled" type="checkbox" /> 启用</label>
       <button class="primary-button" type="submit">保存工作流</button>
     </form>
@@ -146,6 +299,16 @@ onMounted(() => {
           <button type="button" class="danger" @click="store.remove(item.id)">删除</button>
         </div>
       </article>
+      <div v-if="logs.length > 0" class="step-results">
+        <strong>最近运行日志</strong>
+        <ol>
+          <li v-for="log in logs.slice(0, 6)" :key="log.id">
+            <span>{{ log.kind }} · {{ log.sourceId }}</span>
+            <em :class="log.status">{{ log.status }}</em>
+            <small>{{ log.message }}</small>
+          </li>
+        </ol>
+      </div>
     </section>
   </section>
 </template>

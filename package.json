@@ -6,10 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
+    "test": "vitest run",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "tauri:build:windows": "tauri build --bundles nsis --ci",
+    "tauri:build:linux": "tauri build --ci"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
@@ -24,6 +27,7 @@
     "sass": "^1.83.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0",
+    "vitest": "^4.1.7",
     "vue-tsc": "^2.2.0"
   }
 }
