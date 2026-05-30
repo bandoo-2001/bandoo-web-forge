@@ -41,7 +41,28 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-      - run: cargo check --manifest-path src-tauri/Cargo.toml
+      - name: Run cargo check --manifest-path src-tauri/Cargo.toml
+        if: runner.os != 'macOS'
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+      - name: Run cargo check --manifest-path src-tauri/Cargo.toml
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set +e
+          cargo check --manifest-path src-tauri/Cargo.toml > cargo-check.log 2>&1
+          status=$?
+          cat cargo-check.log
+          if [ "$status" -ne 0 ]; then
+            python3 - <<'PY'
+          from pathlib import Path
+
+          text = Path("cargo-check.log").read_text(errors="replace")
+          tail = "\n".join(text.splitlines()[-80:])
+          escaped = tail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error title=macOS cargo check failed::{escaped}")
+          PY
+            exit "$status"
+          fi
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
   release:
