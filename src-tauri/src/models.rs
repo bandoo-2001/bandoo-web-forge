@@ -349,6 +349,8 @@ pub struct RuntimeInfo {
     pub family: &'static str,
     pub arch: &'static str,
     pub linux_primary: bool,
+    pub macos_supported: bool,
+    pub desktop_integration_supported: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

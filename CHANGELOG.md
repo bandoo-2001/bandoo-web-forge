@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- 实验性 macOS 支持：CI checks、DMG 打包脚本和 Release 资产上传。
+- macOS 桌面集成：`~/Applications` / 桌面 `.app` wrapper，以及 `~/Library/LaunchAgents` 自启动入口。
+- 运行时平台信息增加 macOS 与桌面集成支持状态。
+
+### Known Limitations
+
+- macOS 产物暂未签名、公证，也暂不发布 Universal Binary。
+
 ## v0.1.0-beta.3
 
 内测文档与发布卫生收口版本。

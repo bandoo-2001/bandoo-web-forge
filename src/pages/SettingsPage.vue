@@ -68,6 +68,10 @@ async function importThemes() {
       <strong>{{ info.family }}</strong>
       <span>Arch</span>
       <strong>{{ info.arch }}</strong>
+      <span>macOS 支持</span>
+      <strong>{{ info.macosSupported ? '是' : '否' }}</strong>
+      <span>桌面集成</span>
+      <strong>{{ info.desktopIntegrationSupported ? '可用' : '不可用' }}</strong>
       <span>Linux 优先</span>
       <strong>{{ info.linuxPrimary ? '是' : '否' }}</strong>
     </div>

@@ -6,6 +6,8 @@ export interface RuntimeInfo {
   family: string
   arch: string
   linuxPrimary: boolean
+  macosSupported: boolean
+  desktopIntegrationSupported: boolean
 }
 
 function isTauriRuntime() {
@@ -19,6 +21,8 @@ export const useRuntimeStore = defineStore('runtime', {
       family: 'web',
       arch: 'unknown',
       linuxPrimary: false,
+      macosSupported: false,
+      desktopIntegrationSupported: false,
     } as RuntimeInfo,
   }),
   actions: {

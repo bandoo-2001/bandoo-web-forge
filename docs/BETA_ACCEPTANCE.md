@@ -8,6 +8,7 @@
 
 - Windows：`Bandoo.WebForge_0.1.0_x64-setup.exe`
 - Linux：`Bandoo.WebForge_0.1.0_amd64.deb`
+- macOS：`.dmg` 安装镜像
 
 Linux 安装示例：
 
@@ -16,6 +17,7 @@ sudo apt install ./Bandoo.WebForge_0.1.0_amd64.deb
 ```
 
 Windows 安装包暂未签名，安装时出现安全提示属于当前已知限制。
+macOS 安装包暂未签名和公证，首次打开时出现 Gatekeeper 提示属于当前已知限制。
 
 ## 核心验收路径
 
@@ -104,6 +106,13 @@ Windows：
 3. 创建启动目录快捷方式。
 4. 删除 WebApp，确认关联快捷方式被清理。
 
+macOS：
+
+1. 创建应用入口，确认 `~/Applications` 下出现 WebApp `.app` wrapper。
+2. 创建桌面入口，确认桌面出现 WebApp `.app` wrapper。
+3. 创建自启动入口，确认 `~/Library/LaunchAgents` 下出现对应 `.plist`。
+4. 删除 WebApp，确认关联 `.app` 和 LaunchAgent 被清理。
+
 ## 发布验收
 
 发布前至少确认：
@@ -117,10 +126,11 @@ Windows：
 - GitHub Actions Ubuntu checks 通过。
 - Release 上传 Windows `.exe`。
 - Release 上传 Linux `.deb`。
+- Release 上传 macOS `.dmg`。
 
 ## 当前已知限制
 
-- macOS 暂不支持本轮内测。
 - Windows 安装包未签名。
 - Linux 仅发布 `.deb`。
-- AppImage/RPM、自动更新和代码签名将在后续版本处理。
+- macOS 安装包未签名、未公证，且暂不发布 Universal Binary。
+- AppImage/RPM、自动更新、代码签名和 macOS 公证将在后续版本处理。

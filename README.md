@@ -6,7 +6,7 @@ Bandoo WebForge 是一个基于 Tauri v2 的桌面运行时，用来把 WebApp/P
 
 ## 当前状态
 
-当前版本处于开发者内测阶段，主目标是验证 Windows 和 Linux 双平台的核心闭环：
+当前版本处于开发者内测阶段，主目标是验证 Windows、Linux 和 macOS 的核心闭环：
 
 - 创建、编辑、删除和启动 WebApp。
 - 使用本地 shell 承载自定义顶部栏，并在内容区域加载远程 WebView。
@@ -18,7 +18,8 @@ Bandoo WebForge 是一个基于 Tauri v2 的桌面运行时，用来把 WebApp/P
 - 支持自动化触发、步骤编辑、录制、选择器采集和执行日志。
 - 支持用户脚本手动运行、页面加载、URL 变化和快捷键运行。
 - 支持 Linux `.desktop` 入口和 Windows 快捷方式。
-- GitHub Actions 可以完成 Windows NSIS 和 Linux DEB 内测产物构建。
+- 支持 macOS `.app` 快捷入口和 LaunchAgent 自启动入口。
+- GitHub Actions 可以完成 Windows NSIS、Linux DEB 和 macOS DMG 内测产物构建。
 
 ## 安装内测版
 
@@ -26,6 +27,7 @@ Bandoo WebForge 是一个基于 Tauri v2 的桌面运行时，用来把 WebApp/P
 
 - Windows：下载 `Bandoo.WebForge_0.1.0_x64-setup.exe`
 - Linux：下载 `Bandoo.WebForge_0.1.0_amd64.deb`
+- macOS：下载 `.dmg` 安装镜像
 
 发布页：
 
@@ -89,7 +91,13 @@ Linux DEB：
 npm run tauri:build:linux
 ```
 
-当前 Linux Release 只构建 `.deb`，AppImage/RPM 会在后续稳定后再恢复。
+macOS DMG：
+
+```bash
+npm run tauri:build:macos
+```
+
+当前 Linux Release 只构建 `.deb`，AppImage/RPM 会在后续稳定后再恢复。当前 macOS Release 先构建 Intel DMG，签名、公证和 Universal Binary 会在后续处理。
 
 ## 项目结构
 
@@ -109,7 +117,7 @@ npm run tauri:build:linux
 
 ## 已知限制
 
-- macOS 暂不进入本轮内测。
 - Windows 安装包未签名，安装时可能出现安全提示。
 - Linux 暂只发布 `.deb`。
-- AppImage/RPM、自动更新、代码签名和更完整的跨发行版验证属于下一轮发布工作。
+- macOS 暂未签名/公证，首次打开可能需要用户手动确认。
+- AppImage/RPM、自动更新、代码签名、公证、Universal Binary 和更完整的跨发行版验证属于下一轮发布工作。

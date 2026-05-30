@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest]
+        os: [ubuntu-22.04, windows-latest, macos-13]
 
     steps:
       - uses: actions/checkout@v4
@@ -54,7 +54,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest]
+        os: [ubuntu-22.04, windows-latest, macos-13]
 
     steps:
       - uses: actions/checkout@v4
@@ -85,9 +85,13 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run tauri:build:linux
 
+      - name: Build macOS DMG bundle
+        if: runner.os == 'macOS'
+        run: npm run tauri:build:macos
+
       - uses: softprops/action-gh-release@v2
         with:
           prerelease: ${{ contains(github.ref_name, '-beta') }}
           generate_release_notes: true
           files: |
-            src-tauri/target/release/bundle/**/*.{deb,msi,exe,zip}
+            src-tauri/target/release/bundle/**/*.{deb,dmg,msi,exe,zip}
