@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "remote-webapp-bridge",
+  "description": "Remote WebApp content may use only Bandoo application commands that are guarded by per-WebApp permissions.",
+  "windows": ["webapp-*"],
+  "webviews": ["webapp-*-content"],
+  "remote": {
+    "urls": ["http://*", "https://*"]
+  },
+  "permissions": [
+    "allow-bridge-request"
+  ]
+}

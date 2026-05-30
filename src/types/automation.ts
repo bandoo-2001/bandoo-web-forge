@@ -17,6 +17,8 @@ export interface AutomationAction {
   text?: string
   script?: string
   value?: string
+  timeoutMs?: number
+  continueOnError?: boolean
 }
 
 export interface AutomationConfig {
@@ -38,12 +40,32 @@ export interface AutomationStepResult {
   actionKind: string
   status: string
   message: string
+  durationMs?: number
 }
 
 export interface AutomationRunResult {
+  runId: string
   automationId: string
   webAppId: string
   dispatched: boolean
   message: string
   steps: AutomationStepResult[]
+  startedAt: number
+  finishedAt?: number
+  durationMs?: number
+  error?: string
+}
+
+export interface AutomationRunLog {
+  id: string
+  sourceId: string
+  webAppId: string
+  kind: string
+  status: string
+  message: string
+  steps: AutomationStepResult[]
+  startedAt: number
+  finishedAt?: number
+  durationMs?: number
+  error?: string
 }

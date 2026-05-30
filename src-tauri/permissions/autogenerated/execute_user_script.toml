@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-execute-user-script"
+description = "Enables the execute_user_script command without any pre-configured scope."
+commands.allow = ["execute_user_script"]
+
+[[permission]]
+identifier = "deny-execute-user-script"
+description = "Denies the execute_user_script command without any pre-configured scope."
+commands.deny = ["execute_user_script"]

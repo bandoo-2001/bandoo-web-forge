@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { RouterLink, RouterView } from 'vue-router'
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+
+const route = useRoute()
+const shellMode = computed(() => route.meta.shell === true)
 </script>
 
 <template>
-  <div class="shell">
+  <RouterView v-if="shellMode" />
+  <div v-else class="shell">
     <aside class="sidebar">
       <div class="brand">
         <span class="brand-mark">B</span>

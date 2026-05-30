@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-upsert-webapp"
+description = "Enables the upsert_webapp command without any pre-configured scope."
+commands.allow = ["upsert_webapp"]
+
+[[permission]]
+identifier = "deny-upsert-webapp"
+description = "Denies the upsert_webapp command without any pre-configured scope."
+commands.deny = ["upsert_webapp"]
