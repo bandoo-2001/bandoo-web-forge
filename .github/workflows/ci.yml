@@ -81,11 +81,11 @@ jobs:
         if: runner.os == 'Windows'
         run: npm run tauri:build:windows
 
-      - name: Build Linux bundles
+      - name: Build Linux DEB bundle
         if: runner.os == 'Linux'
         run: npm run tauri:build:linux
 
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            src-tauri/target/release/bundle/**/*.{AppImage,deb,rpm,msi,exe,zip}
+            src-tauri/target/release/bundle/**/*.{deb,msi,exe,zip}
