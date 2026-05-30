@@ -86,8 +86,12 @@ fn configured_shell_window(
         .inner_size(webapp.window_config.width, webapp.window_config.height)
         .min_inner_size(640.0, 420.0)
         .decorations(webapp.window_config.decorations)
-        .transparent(webapp.window_config.transparent)
         .shadow(chrome.shadow);
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder = builder.transparent(webapp.window_config.transparent);
+    }
 
     if let Some(state) = &webapp.last_window_state {
         builder = builder
@@ -112,9 +116,12 @@ fn configured_shell_window(
     let user_scripts_json = user_scripts_json(app, webapp)?;
     let automations_json = automations_json(app, webapp)?;
     let shell_url = WebviewUrl::App(format!("index.html#/shell/{}", webapp.id).into());
-    let shell = WebviewBuilder::new(shell_label(&webapp.id), shell_url)
-        .transparent(webapp.window_config.transparent)
-        .auto_resize();
+    let mut shell = WebviewBuilder::new(shell_label(&webapp.id), shell_url);
+    #[cfg(not(target_os = "macos"))]
+    {
+        shell = shell.transparent(webapp.window_config.transparent);
+    }
+    let shell = shell.auto_resize();
     window
         .add_child(
             shell,

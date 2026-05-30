@@ -11,6 +11,7 @@
 ### Known Limitations
 
 - macOS 产物暂未签名、公证，也暂不发布 Universal Binary。
+- macOS 暂不启用 Tauri builder 级透明窗口，透明和圆角优先走内容层退化。
 
 ## v0.1.0-beta.3
 
